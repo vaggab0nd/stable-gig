@@ -145,6 +145,12 @@ async def analyse_video(file: UploadFile = File(...)):
             detail=f"Gemini returned non-JSON response: {raw_text[:300]}",
         )
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        msg = str(exc)
+        if "429" in msg or "quota" in msg.lower() or "rate" in msg.lower():
+            raise HTTPException(
+                status_code=429,
+                detail="Gemini API quota exceeded. Please check your billing plan at https://aistudio.google.com/",
+            )
+        raise HTTPException(status_code=500, detail=msg)
     finally:
         os.unlink(tmp_path)
