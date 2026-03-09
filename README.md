@@ -6,13 +6,19 @@ A minimal proof-of-concept web app that lets you upload a short video of a home 
 
 ```
 /backend
-  main.py           # FastAPI app — POST /analyse endpoint
+  main.py           # FastAPI app — GET / and POST /analyse
   requirements.txt
+  /static
+    index.html      # Frontend served by FastAPI at GET /
 /frontend
-  index.html        # Single-file vanilla JS frontend
+  index.html        # Local dev copy (keep in sync with backend/static/)
 .env.example
 README.md
 ```
+
+> `backend/static/index.html` is the copy that gets deployed to Railway.
+> `frontend/index.html` is kept for local development convenience.
+> If you edit one, update the other.
 
 ## Prerequisites
 
@@ -49,11 +55,15 @@ README.md
    uvicorn main:app --reload --port 8000
    ```
 
-5. **Open the frontend**
+5. **Open the app**
 
-   Open `frontend/index.html` directly in your browser **or** serve it via any static file server. The backend already allows all CORS origins for local dev, so no proxy is required.
+   Visit [http://localhost:8000](http://localhost:8000) — the backend serves the frontend directly.
 
 ## API
+
+### `GET /`
+
+Returns the frontend UI (`backend/static/index.html`).
 
 ### `POST /analyse`
 
@@ -72,15 +82,27 @@ Accepts a `multipart/form-data` upload with a single field named `file` containi
     "How long has the tap been dripping?",
     "Is the drip from the hot or cold side?",
     "Have you noticed any water damage under the sink?"
-  ]
+  ],
+  "video_metadata": {
+    "duration_seconds": 12.4,
+    "resolution": "1920x1080",
+    "frame_rate_fps": 30.0,
+    "recorded_at": "2024-11-01T10:23:00",
+    "latitude": 51.5074,
+    "longitude": -0.1278,
+    "device_make": "Samsung",
+    "device_model": "SM-G991B"
+  }
 }
 ```
+
+`video_metadata` is a best-effort extraction from the file's technical and embedded tags (via `hachoir` and `mutagen`). Fields are omitted if not present in the file.
 
 ## Deploying to Railway
 
 1. Push this repo to GitHub.
 2. Create a new Railway project → **Deploy from GitHub repo**.
-3. Add a service pointing to the `/backend` directory.
+3. Set **Root Directory** to `backend`.
 4. Set the start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
 5. Add the `GEMINI_API_KEY` environment variable in Railway's settings.
-6. Serve `/frontend/index.html` via Railway's static file hosting or a separate Nginx service.
+6. The app serves the UI at `/` — no separate static hosting needed.
