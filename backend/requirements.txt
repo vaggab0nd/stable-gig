@@ -1,7 +1,19 @@
+# Core framework
 fastapi==0.115.5
 uvicorn[standard]==0.32.1
 python-multipart==0.0.12
-google-generativeai==0.8.3
 python-dotenv==1.0.1
+pydantic-settings==2.7.0
+
+# Gemini
+google-generativeai==0.8.3
+
+# Video metadata extraction
 mutagen==1.47.0
 hachoir==3.3.0
+
+# Supabase
+supabase==2.10.0
+
+# HTTP client (Smarty API, future integrations)
+httpx==0.27.2
