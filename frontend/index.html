@@ -458,20 +458,14 @@
         </button>
       </div>
 
-      <!-- Step 2: OTP verify -->
+      <!-- Step 2: magic link sent -->
       <div id="login-step-2" style="display:none">
         <h2>Check your email</h2>
-        <div id="login-error-2" class="form-error" style="display:none"></div>
         <p class="form-info">
-          We sent a 6-digit code to <strong id="otp-email-display"></strong>. Enter it below.
+          We sent a sign-in link to <strong id="otp-email-display"></strong>.<br>
+          Click the link in that email to continue.
         </p>
-        <div class="form-group">
-          <label for="otp-input">Sign-in code</label>
-          <input type="text" id="otp-input" placeholder="123456" maxlength="6"
-                 inputmode="numeric" autocomplete="one-time-code" />
-          <p class="otp-hint">Check your spam folder if it doesn't arrive within a minute.</p>
-        </div>
-        <button class="btn-primary" id="verify-btn">Verify code</button>
+        <p class="otp-hint">Check your spam folder if it doesn't arrive within a minute.</p>
         <button class="back-link" id="back-btn">&#8592; Use a different email</button>
       </div>
 
@@ -804,55 +798,8 @@
       }
     });
 
-    // ---- Verify OTP ----
-    document.getElementById("verify-btn").addEventListener("click", async () => {
-      const code = document.getElementById("otp-input").value.trim();
-      if (!code) { showLoginError(2, "Please enter the code from your email."); return; }
-
-      const btn = document.getElementById("verify-btn");
-      btn.disabled = true;
-      btn.textContent = "Verifying…";
-      clearLoginErrors();
-
-      try {
-        const r = await fetch("/auth/verify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: pendingEmail, token: code }),
-        });
-        const data = await r.json();
-        if (!r.ok) throw new Error(data.detail || "Verification failed");
-
-        session = { access_token: data.access_token, email: pendingEmail };
-        sessionStorage.setItem("access_token", data.access_token);
-        sessionStorage.setItem("user_email", pendingEmail);
-
-        // Check setup status before routing
-        setupComplete = false;
-        try {
-          const mr = await fetch("/me/metadata", {
-            headers: { Authorization: `Bearer ${data.access_token}` },
-          });
-          if (mr.ok) {
-            const meta = await mr.json();
-            setupComplete = meta.setup_complete === true;
-          }
-        } catch {}
-
-        navigate(setupComplete ? "/dashboard" : "/signup");
-      } catch (err) {
-        showLoginError(2, err.message);
-      } finally {
-        btn.disabled = false;
-        btn.textContent = "Verify code";
-      }
-    });
-
     document.getElementById("back-btn").addEventListener("click", () => showLoginStep(1));
 
-    document.getElementById("otp-input").addEventListener("keydown", (e) => {
-      if (e.key === "Enter") document.getElementById("verify-btn").click();
-    });
     document.getElementById("auth-email").addEventListener("keydown", (e) => {
       if (e.key === "Enter") document.getElementById("send-code-btn").click();
     });
