@@ -1,8 +1,5 @@
 FROM python:3.11-slim
 
-# ── Stage: production image ─────────────────────────────────────────────────────
-FROM python:3.11-slim
-
 # Create a non-root user so the container doesn't run as root
 RUN useradd -m -u 1000 appuser
 
@@ -15,12 +12,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application source
 COPY main.py .
 COPY static/ static/
-
-# Cloud Run injects $PORT at runtime (default 8080)
-ENV PORT=8080
-
-CMD uvicorn main:app --host 0.0.0.0 --port $PORT
-COPY . .
 
 # Switch to non-root user
 USER appuser
