@@ -45,22 +45,13 @@
     .auth-btn.secondary { border-color: #ccc; color: #555; }
     .auth-btn.secondary:hover { background: #eee; color: #333; }
 
-    /* --- Login page --- */
-    .login-page {
+    /* --- Centered page wrapper (login + signup) --- */
+    .centered-page {
       display: flex;
       flex-direction: column;
       align-items: center;
       width: 100%;
     }
-    .login-card {
-      background: #fff;
-      border-radius: 12px;
-      padding: 2rem;
-      width: 100%;
-      max-width: 380px;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.18);
-    }
-    .login-card h2 { font-size: 1.2rem; margin-bottom: 1.5rem; }
 
     /* --- Shared form styles --- */
     .form-group { margin-bottom: 1rem; }
@@ -71,16 +62,22 @@
       color: #555;
       margin-bottom: 0.35rem;
     }
-    .form-group input {
+    .form-group input,
+    .form-group textarea {
       width: 100%;
       padding: 0.65rem 0.75rem;
       border: 1px solid #ddd;
       border-radius: 6px;
       font-size: 0.95rem;
+      font-family: inherit;
       outline: none;
       transition: border-color 0.15s;
+      background: #fff;
     }
-    .form-group input:focus { border-color: #4a6cf7; }
+    .form-group input:focus,
+    .form-group textarea:focus { border-color: #4a6cf7; }
+    .form-group input[readonly] { background: #f9fafb; color: #6b7280; cursor: default; }
+    .form-group textarea { resize: vertical; min-height: 80px; }
     .btn-primary {
       width: 100%;
       padding: 0.75rem;
@@ -156,6 +153,146 @@
       display: block;
     }
     .back-link:hover { text-decoration: underline; }
+
+    /* --- Login card --- */
+    .login-card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 2rem;
+      width: 100%;
+      max-width: 380px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+    }
+    .login-card h2 { font-size: 1.2rem; margin-bottom: 1.5rem; }
+
+    /* --- Signup card --- */
+    .signup-card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 2rem;
+      width: 100%;
+      max-width: 480px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+    }
+    .signup-card h2 { font-size: 1.2rem; margin-bottom: 1.25rem; }
+
+    /* Progress steps */
+    .progress-steps {
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      margin-bottom: 1.75rem;
+    }
+    .progress-step {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .step-number {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      border: 2px solid #d1d5db;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #9ca3af;
+      background: #fff;
+      transition: border-color 0.2s, background 0.2s, color 0.2s;
+    }
+    .progress-step.active .step-number {
+      border-color: #4a6cf7;
+      background: #4a6cf7;
+      color: #fff;
+    }
+    .step-label { font-size: 0.75rem; color: #9ca3af; white-space: nowrap; }
+    .progress-step.active .step-label { color: #4a6cf7; font-weight: 600; }
+    .progress-connector {
+      flex: 1;
+      max-width: 64px;
+      height: 2px;
+      background: #d1d5db;
+      margin: 15px 0.5rem 0; /* vertically center with the circles */
+    }
+
+    /* Form row (ZIP / city / state) */
+    .form-row {
+      display: grid;
+      grid-template-columns: 110px 1fr 70px;
+      gap: 0.75rem;
+    }
+
+    /* Address autocomplete */
+    .autocomplete-wrap { position: relative; }
+    .autocomplete-dropdown {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: #fff;
+      border: 1px solid #ddd;
+      border-top: none;
+      border-radius: 0 0 6px 6px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      z-index: 20;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    .dropdown-item {
+      padding: 0.6rem 0.75rem;
+      font-size: 0.88rem;
+      cursor: pointer;
+      color: #374151;
+    }
+    .dropdown-item:hover { background: #f0f4ff; color: #4a6cf7; }
+
+    /* Interests grid */
+    .interests-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.65rem;
+      margin-bottom: 1.5rem;
+    }
+    .interest-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 0.9rem 0.5rem 0.75rem;
+      border: 2px solid #e5e7eb;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+      user-select: none;
+    }
+    .interest-card:hover { border-color: #a5b4fc; background: #f5f7ff; }
+    .interest-card.selected { border-color: #4a6cf7; background: #eef2ff; }
+    .interest-card input[type="checkbox"] { display: none; }
+    .interest-icon { font-size: 1.6rem; margin-bottom: 0.35rem; }
+    .interest-label { font-size: 0.8rem; font-weight: 500; color: #374151; }
+    .interest-card.selected .interest-label { color: #4a6cf7; }
+
+    /* Step button row */
+    .btn-row {
+      display: flex;
+      gap: 0.75rem;
+      margin-top: 0.5rem;
+    }
+    .btn-secondary {
+      flex: 1;
+      padding: 0.75rem;
+      background: #fff;
+      color: #6b7280;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .btn-secondary:hover { background: #f9fafb; }
+    .btn-complete { flex: 2; margin-bottom: 0; }
 
     /* --- Main card (dashboard) --- */
     .card {
@@ -296,7 +433,7 @@
   <p class="subtitle">Upload a video of your repair issue for an instant AI assessment</p>
 
   <!-- ===== LOGIN PAGE ===== -->
-  <div id="page-login" class="login-page" style="display:none">
+  <div id="page-login" class="centered-page" style="display:none">
     <div class="login-card">
 
       <!-- Step 1: email + Google -->
@@ -341,6 +478,91 @@
     </div>
   </div>
 
+  <!-- ===== SIGNUP PAGE ===== -->
+  <div id="page-signup" class="centered-page" style="display:none">
+    <div class="signup-card">
+
+      <!-- Progress indicator -->
+      <div class="progress-steps">
+        <div class="progress-step active" id="step-dot-1">
+          <div class="step-number">1</div>
+          <div class="step-label">Your Profile</div>
+        </div>
+        <div class="progress-connector"></div>
+        <div class="progress-step" id="step-dot-2">
+          <div class="step-number">2</div>
+          <div class="step-label">Interests</div>
+        </div>
+      </div>
+
+      <!-- Step 1: Basic profile + address -->
+      <div id="signup-step-1">
+        <h2>Set up your profile</h2>
+
+        <div class="form-group">
+          <label for="su-fullname">Full Name</label>
+          <input type="text" id="su-fullname" placeholder="Jane Smith"
+                 autocomplete="name" />
+        </div>
+
+        <div class="form-group">
+          <label for="su-username">Username</label>
+          <input type="text" id="su-username" placeholder="janesmith" autocomplete="off" />
+        </div>
+
+        <div class="form-group">
+          <label for="su-bio">Bio</label>
+          <textarea id="su-bio" placeholder="Tell us a bit about yourself…"></textarea>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="su-zip">ZIP Code</label>
+            <input type="text" id="su-zip" placeholder="90210" maxlength="5"
+                   inputmode="numeric" autocomplete="postal-code" />
+          </div>
+          <div class="form-group">
+            <label for="su-city">City</label>
+            <input type="text" id="su-city" readonly placeholder="Auto-filled" />
+          </div>
+          <div class="form-group">
+            <label for="su-state">State</label>
+            <input type="text" id="su-state" readonly placeholder="CA" />
+          </div>
+        </div>
+
+        <div class="form-group autocomplete-wrap">
+          <label for="su-street">Street Address</label>
+          <input type="text" id="su-street" placeholder="123 Main St"
+                 autocomplete="off" />
+          <div class="autocomplete-dropdown" id="street-dropdown" style="display:none"></div>
+        </div>
+
+        <div id="signup-error-1" class="form-error" style="display:none"></div>
+        <button class="btn-primary" id="signup-next-btn" style="margin-top:0.25rem">Next &rarr;</button>
+        <p class="form-info" style="text-align:center; margin-top:0.25rem; margin-bottom:0">
+          All fields are optional — you can fill these in later.
+        </p>
+      </div>
+
+      <!-- Step 2: Interests -->
+      <div id="signup-step-2" style="display:none">
+        <h2>What are your interests?</h2>
+        <p class="form-info">Select the repair categories you care most about.</p>
+
+        <div class="interests-grid" id="interests-grid"></div>
+
+        <div id="signup-error-2" class="form-error" style="display:none"></div>
+
+        <div class="btn-row">
+          <button class="btn-secondary" id="signup-back-btn">&larr; Back</button>
+          <button class="btn-primary btn-complete" id="signup-complete-btn">Complete Setup</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
   <!-- ===== DASHBOARD PAGE ===== -->
   <div id="page-dashboard" style="display:none">
 
@@ -367,9 +589,10 @@
     // ------------------------------------------------------------------ //
     // Auth state
     // ------------------------------------------------------------------ //
-    let authConfig  = null; // { supabase_url, anon_key }
-    let session     = null; // { access_token, email }
-    let pendingEmail = "";
+    let authConfig   = null; // { supabase_url, anon_key }
+    let session      = null; // { access_token, email }
+    let setupComplete = false;
+    let pendingEmail  = "";
 
     // ------------------------------------------------------------------ //
     // Router
@@ -380,20 +603,33 @@
     }
 
     function route() {
-      const path        = window.location.pathname;
-      const loginPage   = document.getElementById("page-login");
-      const dashPage    = document.getElementById("page-dashboard");
+      const path      = window.location.pathname;
+      const loginPage = document.getElementById("page-login");
+      const signupPage = document.getElementById("page-signup");
+      const dashPage  = document.getElementById("page-dashboard");
+
+      // Helper: hide all, show one
+      function show(el) {
+        [loginPage, signupPage, dashPage].forEach(p => p.style.display = "none");
+        el.style.display = "";
+      }
 
       if (path === "/dashboard") {
         if (!session) { navigate("/"); return; }
-        loginPage.style.display = "none";
-        dashPage.style.display  = "";
+        show(dashPage);
         renderAuthBar();
+      } else if (path === "/signup") {
+        if (!session) { navigate("/"); return; }
+        if (setupComplete) { navigate("/dashboard"); return; }
+        show(signupPage);
+        showSignupStep(1);
       } else {
         // "/" or anything else → login page
-        if (session) { navigate("/dashboard"); return; }
-        loginPage.style.display = "";
-        dashPage.style.display  = "none";
+        if (session) {
+          navigate(setupComplete ? "/dashboard" : "/signup");
+          return;
+        }
+        show(loginPage);
         showLoginStep(1);
       }
     }
@@ -448,6 +684,17 @@
           session = { access_token: token, email };
           sessionStorage.setItem("access_token", token);
           sessionStorage.setItem("user_email", email);
+
+          // Check whether onboarding is complete
+          try {
+            const mr = await fetch("/me/metadata", {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            if (mr.ok) {
+              const meta = await mr.json();
+              setupComplete = meta.setup_complete === true;
+            }
+          } catch {}
           return;
         }
       } catch {}
@@ -467,6 +714,7 @@
       sessionStorage.removeItem("access_token");
       sessionStorage.removeItem("user_email");
       session = null;
+      setupComplete = false;
     }
 
     function renderAuthBar() {
@@ -481,7 +729,7 @@
     }
 
     // ------------------------------------------------------------------ //
-    // Login page — form helpers
+    // Login page
     // ------------------------------------------------------------------ //
     function showLoginStep(n) {
       document.getElementById("login-step-1").style.display = n === 1 ? "" : "none";
@@ -552,7 +800,20 @@
         session = { access_token: data.access_token, email: pendingEmail };
         sessionStorage.setItem("access_token", data.access_token);
         sessionStorage.setItem("user_email", pendingEmail);
-        navigate("/dashboard");
+
+        // Check setup status before routing
+        setupComplete = false;
+        try {
+          const mr = await fetch("/me/metadata", {
+            headers: { Authorization: `Bearer ${data.access_token}` },
+          });
+          if (mr.ok) {
+            const meta = await mr.json();
+            setupComplete = meta.setup_complete === true;
+          }
+        } catch {}
+
+        navigate(setupComplete ? "/dashboard" : "/signup");
       } catch (err) {
         showLoginError(2, err.message);
       } finally {
@@ -573,7 +834,7 @@
     // ---- Google OAuth (implicit flow — token returned in URL hash) ----
     document.getElementById("google-btn").addEventListener("click", () => {
       if (!authConfig?.supabase_url) return;
-      // Always redirect back to "/" so bootAuth can handle the hash and route to /dashboard
+      // Always redirect back to "/" so bootAuth can handle the hash and route correctly
       const redirectTo = window.location.origin + "/";
       const url =
         `${authConfig.supabase_url}/auth/v1/authorize` +
@@ -583,8 +844,189 @@
       window.location.href = url;
     });
 
-    // Boot auth on page load
-    bootAuth();
+    // ------------------------------------------------------------------ //
+    // Signup page
+    // ------------------------------------------------------------------ //
+    const TRADE_CATEGORIES = [
+      { value: "plumbing",    label: "Plumbing",    icon: "🔧" },
+      { value: "electrical",  label: "Electrical",  icon: "⚡" },
+      { value: "structural",  label: "Structural",  icon: "🏗️" },
+      { value: "damp",        label: "Damp",        icon: "💧" },
+      { value: "roofing",     label: "Roofing",     icon: "🏠" },
+      { value: "general",     label: "General",     icon: "🔨" },
+    ];
+
+    // Render interest cards once at init (preserves checkbox state across step changes)
+    (function initInterestsGrid() {
+      const grid = document.getElementById("interests-grid");
+      grid.innerHTML = TRADE_CATEGORIES.map(cat => `
+        <label class="interest-card" data-value="${cat.value}">
+          <input type="checkbox" class="interest-cb" value="${cat.value}" />
+          <span class="interest-icon">${cat.icon}</span>
+          <span class="interest-label">${cat.label}</span>
+        </label>`).join("");
+
+      grid.querySelectorAll(".interest-card").forEach(card => {
+        const cb = card.querySelector("input");
+        // Sync the visual .selected class when the checkbox changes
+        cb.addEventListener("change", () => card.classList.toggle("selected", cb.checked));
+      });
+    })();
+
+    function showSignupStep(n) {
+      document.getElementById("signup-step-1").style.display = n === 1 ? "" : "none";
+      document.getElementById("signup-step-2").style.display = n === 2 ? "" : "none";
+      document.getElementById("step-dot-1").classList.toggle("active", n >= 1);
+      document.getElementById("step-dot-2").classList.toggle("active", n >= 2);
+      document.getElementById("signup-error-1").style.display = "none";
+      document.getElementById("signup-error-2").style.display = "none";
+    }
+
+    // ---- ZIP lookup (auto-fill city + state) ----
+    let zipTimer = null;
+    document.getElementById("su-zip").addEventListener("input", (e) => {
+      const zip = e.target.value.trim();
+      clearTimeout(zipTimer);
+      if (/^\d{5}$/.test(zip)) {
+        zipTimer = setTimeout(() => doZipLookup(zip), 350);
+      } else {
+        document.getElementById("su-city").value  = "";
+        document.getElementById("su-state").value = "";
+      }
+    });
+
+    async function doZipLookup(zip) {
+      try {
+        const r = await fetch(`/address/zip?postcode=${zip}`);
+        if (r.ok) {
+          const data = await r.json();
+          document.getElementById("su-city").value  = data.city  || "";
+          document.getElementById("su-state").value = data.state || "";
+        }
+      } catch {}
+    }
+
+    // ---- Street address autocomplete ----
+    const streetInput    = document.getElementById("su-street");
+    const streetDropdown = document.getElementById("street-dropdown");
+    let streetTimer = null;
+
+    streetInput.addEventListener("input", () => {
+      clearTimeout(streetTimer);
+      const search = streetInput.value.trim();
+      if (search.length < 3) { hideStreetDropdown(); return; }
+      streetTimer = setTimeout(() => doAddressAutocomplete(search), 350);
+    });
+
+    streetInput.addEventListener("blur", () => {
+      // Small delay so a mousedown on a suggestion fires first
+      setTimeout(hideStreetDropdown, 200);
+    });
+
+    async function doAddressAutocomplete(search) {
+      const zip = document.getElementById("su-zip").value.trim();
+      let url = `/address/autocomplete?search=${encodeURIComponent(search)}`;
+      if (/^\d{5}$/.test(zip)) url += `&postcode=${zip}`;
+      try {
+        const r = await fetch(url);
+        if (r.ok) showStreetDropdown(await r.json());
+      } catch {}
+    }
+
+    function showStreetDropdown(suggestions) {
+      if (!suggestions.length) { hideStreetDropdown(); return; }
+      streetDropdown.innerHTML = suggestions
+        .map((s, i) => `<div class="dropdown-item" data-idx="${i}">${esc(s.display)}</div>`)
+        .join("");
+      suggestions.forEach((s, i) => {
+        streetDropdown.querySelector(`[data-idx="${i}"]`).addEventListener("mousedown", () => {
+          streetInput.value = s.street_line;
+          if (s.city)    document.getElementById("su-city").value  = s.city;
+          if (s.state)   document.getElementById("su-state").value = s.state;
+          if (s.zipcode && !document.getElementById("su-zip").value)
+            document.getElementById("su-zip").value = s.zipcode;
+          hideStreetDropdown();
+        });
+      });
+      streetDropdown.style.display = "";
+    }
+
+    function hideStreetDropdown() {
+      streetDropdown.style.display = "none";
+    }
+
+    // ---- Step navigation ----
+    document.getElementById("signup-next-btn").addEventListener("click", () => {
+      showSignupStep(2);
+    });
+
+    document.getElementById("signup-back-btn").addEventListener("click", () => {
+      showSignupStep(1);
+    });
+
+    // ---- Complete Setup ----
+    document.getElementById("signup-complete-btn").addEventListener("click", async () => {
+      const btn = document.getElementById("signup-complete-btn");
+      btn.disabled = true;
+      btn.textContent = "Saving…";
+
+      const token   = session?.access_token;
+      const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
+
+      try {
+        // --- Save profile fields ---
+        const profileData = {};
+        const fullName = document.getElementById("su-fullname").value.trim();
+        const postcode = document.getElementById("su-zip").value.trim();
+        const city     = document.getElementById("su-city").value.trim();
+        const state    = document.getElementById("su-state").value.trim();
+        const street   = document.getElementById("su-street").value.trim();
+
+        if (fullName)  profileData.full_name    = fullName;
+        if (postcode)  profileData.postcode     = postcode;
+        if (city)      profileData.city         = city;
+        if (state)     profileData.state        = state;
+        if (street)    profileData.road_address = street;
+
+        if (Object.keys(profileData).length > 0) {
+          const r1 = await fetch("/me/profile", {
+            method: "PATCH", headers, body: JSON.stringify(profileData),
+          });
+          if (!r1.ok) {
+            const err = await r1.json();
+            throw new Error(err.detail || "Failed to save profile");
+          }
+        }
+
+        // --- Save metadata + mark setup complete ---
+        const metaData = { setup_complete: true };
+        const username  = document.getElementById("su-username").value.trim();
+        const bio       = document.getElementById("su-bio").value.trim();
+        const interests = [...document.querySelectorAll(".interest-cb:checked")]
+                            .map(cb => cb.value);
+
+        if (username)         metaData.username         = username;
+        if (bio)              metaData.bio              = bio;
+        if (interests.length) metaData.trade_interests  = interests;
+
+        const r2 = await fetch("/me/metadata", {
+          method: "PATCH", headers, body: JSON.stringify(metaData),
+        });
+        if (!r2.ok) {
+          const err = await r2.json();
+          throw new Error(err.detail || "Failed to save preferences");
+        }
+
+        setupComplete = true;
+        navigate("/dashboard");
+      } catch (err) {
+        const errEl = document.getElementById("signup-error-2");
+        errEl.textContent = err.message;
+        errEl.style.display = "";
+        btn.disabled = false;
+        btn.textContent = "Complete Setup";
+      }
+    });
 
     // ------------------------------------------------------------------ //
     // Upload & analyse
@@ -651,7 +1093,6 @@
         formData.append("browser_lon", location.lon);
       }
 
-      // Include auth token if signed in so results are persisted
       const headers = {};
       const token = sessionStorage.getItem("access_token");
       if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -815,6 +1256,9 @@
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;");
     }
+
+    // Boot auth on page load
+    bootAuth();
   </script>
 </body>
 </html>
