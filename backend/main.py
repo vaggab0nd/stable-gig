@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from app.routers import analyse, auth, profiles, address
+from app.routers import analyse, auth, profiles, address, user_metadata
 
 app = FastAPI(
     title="Home Repair Video Analyser",
@@ -24,12 +24,14 @@ app.include_router(analyse.router)
 app.include_router(auth.router)
 app.include_router(profiles.router)
 app.include_router(address.router)
+app.include_router(user_metadata.router)
 
 # --- Frontend ---
 _STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
 
 @app.get("/", include_in_schema=False)
+@app.get("/signup", include_in_schema=False)
 @app.get("/dashboard", include_in_schema=False)
 def serve_frontend():
     return FileResponse(os.path.join(_STATIC_DIR, "index.html"))

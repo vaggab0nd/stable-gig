@@ -63,6 +63,36 @@ class ProfileResponse(BaseModel):
     created_at: str
 
 
+VALID_TRADE_CATEGORIES = {"plumbing", "electrical", "structural", "damp", "roofing", "general"}
+
+
+# --- User Metadata ---
+
+class UserMetadataUpdate(BaseModel):
+    username: str | None = None
+    bio: str | None = None
+    trade_interests: list[str] | None = None
+    setup_complete: bool | None = None
+
+    @field_validator("trade_interests")
+    @classmethod
+    def validate_interests(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            invalid = [x for x in v if x not in VALID_TRADE_CATEGORIES]
+            if invalid:
+                raise ValueError(f"Invalid trade categories: {invalid}")
+        return v
+
+
+class UserMetadataResponse(BaseModel):
+    id: str
+    username: str | None
+    bio: str | None
+    trade_interests: list[str]
+    setup_complete: bool
+    updated_at: str
+
+
 # --- Address ---
 
 class AddressSuggestion(BaseModel):
