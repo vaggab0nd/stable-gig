@@ -42,9 +42,19 @@ uvicorn main:app --reload --port 8000
 ### First-time setup
 
 ```bash
-# 1. Store the Gemini API key in Secret Manager
+# 1. Store secrets in Secret Manager
 echo -n "YOUR_GEMINI_API_KEY" | \
   gcloud secrets create GEMINI_API_KEY \
+    --data-file=- \
+    --project=gen-lang-client-0428658103
+
+echo -n "YOUR_SUPABASE_ANON_KEY" | \
+  gcloud secrets create SUPABASE_ANON_KEY \
+    --data-file=- \
+    --project=gen-lang-client-0428658103
+
+echo -n "YOUR_SUPABASE_SERVICE_KEY" | \
+  gcloud secrets create SUPABASE_SERVICE_KEY \
     --data-file=- \
     --project=gen-lang-client-0428658103
 
@@ -59,7 +69,8 @@ gcloud run deploy stable-gig \
   --platform managed \
   --region europe-west1 \
   --allow-unauthenticated \
-  --set-secrets GEMINI_API_KEY=GEMINI_API_KEY:latest \
+  --set-env-vars SUPABASE_URL=https://szpgcvfemllcsajryyuv.supabase.co \
+  --set-secrets GEMINI_API_KEY=GEMINI_API_KEY:latest,SUPABASE_ANON_KEY=SUPABASE_ANON_KEY:latest,SUPABASE_SERVICE_KEY=SUPABASE_SERVICE_KEY:latest \
   --project=gen-lang-client-0428658103
 ```
 
@@ -73,6 +84,8 @@ gcloud run deploy stable-gig \
   --image gcr.io/gen-lang-client-0428658103/stable-gig \
   --platform managed \
   --region europe-west1 \
+  --set-env-vars SUPABASE_URL=https://szpgcvfemllcsajryyuv.supabase.co \
+  --set-secrets GEMINI_API_KEY=GEMINI_API_KEY:latest,SUPABASE_ANON_KEY=SUPABASE_ANON_KEY:latest,SUPABASE_SERVICE_KEY=SUPABASE_SERVICE_KEY:latest \
   --project=gen-lang-client-0428658103
 ```
 
