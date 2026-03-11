@@ -78,6 +78,20 @@
     .form-group textarea:focus { border-color: #4a6cf7; }
     .form-group input[readonly] { background: #f9fafb; color: #6b7280; cursor: default; }
     .form-group textarea { resize: vertical; min-height: 80px; }
+    .zip-hint {
+      font-size: 0.8rem;
+      min-height: 1.1rem;
+      margin-top: -0.5rem;
+      margin-bottom: 0.75rem;
+    }
+    .zip-hint.loading { color: #9ca3af; }
+    .zip-hint.found   { color: #059669; font-weight: 600; }
+    .zip-hint.error   { color: #dc2626; }
+    @keyframes field-filled {
+      0%, 70% { background: #d1fae5; border-color: #10b981; }
+      100%    { background: #f9fafb; border-color: #ddd; }
+    }
+    .field-just-filled { animation: field-filled 1.5s ease-out; }
     .btn-primary {
       width: 100%;
       padding: 0.75rem;
@@ -578,6 +592,8 @@
           </div>
         </div>
 
+        <p id="zip-hint" class="zip-hint"></p>
+
         <div class="form-group autocomplete-wrap">
           <label for="su-street">Street Address</label>
           <input type="text" id="su-street" placeholder="123 Main St"
@@ -1018,23 +1034,49 @@
     document.getElementById("su-zip").addEventListener("input", (e) => {
       const zip = e.target.value.trim();
       clearTimeout(zipTimer);
+      const hint = document.getElementById("zip-hint");
       if (/^\d{5}$/.test(zip)) {
         zipTimer = setTimeout(() => doZipLookup(zip), 350);
       } else {
         document.getElementById("su-city").value  = "";
         document.getElementById("su-state").value = "";
+        hint.textContent = "";
+        hint.className = "zip-hint";
       }
     });
 
     async function doZipLookup(zip) {
+      const hint   = document.getElementById("zip-hint");
+      const cityEl = document.getElementById("su-city");
+      const stateEl = document.getElementById("su-state");
+      hint.textContent = "Looking up…";
+      hint.className = "zip-hint loading";
       try {
         const r = await fetch(`/address/zip?postcode=${zip}`);
         if (r.ok) {
           const data = await r.json();
-          document.getElementById("su-city").value  = data.city  || "";
-          document.getElementById("su-state").value = data.state || "";
+          cityEl.value  = data.city  || "";
+          stateEl.value = data.state || "";
+          if (data.city && data.state) {
+            hint.textContent = `📍 ${data.city}, ${data.state}`;
+            hint.className = "zip-hint found";
+            [cityEl, stateEl].forEach(el => {
+              el.classList.remove("field-just-filled");
+              void el.offsetWidth; // restart animation
+              el.classList.add("field-just-filled");
+            });
+          } else {
+            hint.textContent = "ZIP code not recognised.";
+            hint.className = "zip-hint error";
+          }
+        } else {
+          hint.textContent = "ZIP code not recognised.";
+          hint.className = "zip-hint error";
         }
-      } catch {}
+      } catch {
+        hint.textContent = "";
+        hint.className = "zip-hint";
+      }
     }
 
     // ---- Street address autocomplete ----
