@@ -115,7 +115,7 @@ class PhotoAnalysisResponse(BaseModel):
     description=(
         "Submit 1–5 photographs of a home repair problem. The service assigns each image "
         "a triangulation role (Wide Shot, Close-up, Scale/Context …), preprocesses them "
-        "for token efficiency, and returns a structured Gemini 2.0 Flash diagnosis."
+        "for token efficiency, and returns a structured Gemini 2.5 Flash diagnosis."
     ),
 )
 async def analyse_photos(
