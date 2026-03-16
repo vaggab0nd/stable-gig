@@ -1,21 +1,25 @@
 /**
  * Supabase Edge Function: contractors
  *
- * CRUD operations for contractor onboarding.
+ * CRUD for contractor onboarding following the "Clean Split" schema:
+ *
+ *   profiles (auth, migration 001)
+ *     └─ contractors    — id = auth.users.id  (business identity & activities)
+ *          └─ contractor_details  — id = contractors.id  (license / insurance)
+ *               └─ bids  — job_id + contractor_id
  *
  * Routes (method + path suffix):
- *   POST   /contractors          → register (upsert) a contractor
- *   GET    /contractors          → fetch the calling contractor's record
- *   PATCH  /contractors          → update contractor fields
- *   POST   /contractors/profile  → upsert extended profile
- *   GET    /contractors/profile  → fetch extended profile
+ *   POST   /contractors         → register contractor (id taken from JWT)
+ *   GET    /contractors         → fetch own contractor record
+ *   PATCH  /contractors         → update contractor fields
+ *   POST   /contractors/details → upsert contractor_details
+ *   GET    /contractors/details → fetch contractor_details
  *
- * All routes require a valid Supabase JWT (Authorization: Bearer <token>).
+ * All routes require:  Authorization: Bearer <supabase-jwt>
  *
- * Required secrets (Supabase dashboard → Edge Functions → Secrets):
+ * Required secrets (Supabase → Project Settings → Edge Functions → Secrets):
  *   SUPABASE_URL
  *   SUPABASE_ANON_KEY
- *   SUPABASE_SERVICE_ROLE_KEY
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -43,7 +47,10 @@ export type Activity = (typeof ACTIVITIES)[number];
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
-/** Schema for registering or updating a contractor's core record. */
+/**
+ * Core contractor fields.
+ * `id` is NOT included in the write payload — it is derived from the JWT.
+ */
 export const ContractorUpsertSchema = z.object({
   business_name: z
     .string()
@@ -57,7 +64,7 @@ export const ContractorUpsertSchema = z.object({
     .string()
     .regex(
       /^\+?[\d\s\-().]{7,25}$/,
-      "Phone must be a valid number (7–25 digits, optional +, spaces, hyphens, parentheses)",
+      "Phone must be 7–25 characters (digits, spaces, +, -, parentheses)",
     ),
   activities: z
     .array(z.enum(ACTIVITIES))
@@ -67,8 +74,19 @@ export const ContractorUpsertSchema = z.object({
 
 export type ContractorUpsert = z.infer<typeof ContractorUpsertSchema>;
 
-/** Schema for upserting the extended contractor profile. */
-export const ContractorProfileUpsertSchema = z.object({
+/** Full contractor row returned to callers (id = the auth user's UUID). */
+export const ContractorResponseSchema = ContractorUpsertSchema.extend({
+  id: z.string().uuid(),
+  created_at: z.string().datetime(),
+});
+
+export type ContractorResponse = z.infer<typeof ContractorResponseSchema>;
+
+/**
+ * contractor_details write payload.
+ * All fields are optional so callers can update a single field at a time.
+ */
+export const ContractorDetailsUpsertSchema = z.object({
   license_number: z.string().max(100).optional().nullable(),
   insurance_verified: z.boolean().optional(),
   years_experience: z
@@ -80,31 +98,22 @@ export const ContractorProfileUpsertSchema = z.object({
     .nullable(),
 });
 
-export type ContractorProfileUpsert = z.infer<
-  typeof ContractorProfileUpsertSchema
+export type ContractorDetailsUpsert = z.infer<
+  typeof ContractorDetailsUpsertSchema
 >;
 
-/** Full contractor response shape returned to callers. */
-export const ContractorResponseSchema = ContractorUpsertSchema.extend({
-  id: z.string().uuid(),
-  user_id: z.string().uuid(),
-  created_at: z.string().datetime(),
-});
-
-export type ContractorResponse = z.infer<typeof ContractorResponseSchema>;
-
-/** Full contractor profile response shape. */
-export const ContractorProfileResponseSchema =
-  ContractorProfileUpsertSchema.extend({
+/** Full contractor_details row returned to callers. */
+export const ContractorDetailsResponseSchema =
+  ContractorDetailsUpsertSchema.extend({
     id: z.string().uuid(),
     updated_at: z.string().datetime(),
   });
 
-export type ContractorProfileResponse = z.infer<
-  typeof ContractorProfileResponseSchema
+export type ContractorDetailsResponse = z.infer<
+  typeof ContractorDetailsResponseSchema
 >;
 
-// ── CORS headers ──────────────────────────────────────────────────────────────
+// ── CORS ──────────────────────────────────────────────────────────────────────
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -129,24 +138,26 @@ function errorResponse(message: string, status: number): Response {
 // ── ContractorService ─────────────────────────────────────────────────────────
 
 /**
- * Thin service layer wrapping Supabase queries for contractors.
- * Constructed with a user-scoped client (RLS applies) so each method
- * operates only on rows the authenticated user is allowed to access.
+ * Service layer for contractor CRUD.
+ *
+ * Clean Split invariant: the contractor's `id` equals the auth user's UUID
+ * (mirroring profiles.id), so every query uses `.eq("id", this.userId)`.
+ * There is no separate `user_id` column.
  */
 export class ContractorService {
   constructor(
     private readonly db: ReturnType<typeof createClient>,
+    /** The authenticated user's UUID — also the contractors.id PK. */
     private readonly userId: string,
   ) {}
 
-  /** Register a new contractor or replace an existing one for this user. */
-  async upsert(payload: ContractorUpsert): Promise<ContractorResponse> {
+  // ── contractors ────────────────────────────────────────────
+
+  /** Register (insert) a contractor row.  id is set from the JWT. */
+  async register(payload: ContractorUpsert): Promise<ContractorResponse> {
     const { data, error } = await this.db
       .from("contractors")
-      .upsert(
-        { ...payload, user_id: this.userId },
-        { onConflict: "user_id", ignoreDuplicates: false },
-      )
+      .insert({ id: this.userId, ...payload })
       .select()
       .single();
 
@@ -159,7 +170,7 @@ export class ContractorService {
     const { data, error } = await this.db
       .from("contractors")
       .select("*")
-      .eq("user_id", this.userId)
+      .eq("id", this.userId)
       .maybeSingle();
 
     if (error) throw new Error(error.message);
@@ -168,13 +179,11 @@ export class ContractorService {
   }
 
   /** Partially update the contractor record for the current user. */
-  async update(
-    payload: Partial<ContractorUpsert>,
-  ): Promise<ContractorResponse> {
+  async update(payload: Partial<ContractorUpsert>): Promise<ContractorResponse> {
     const { data, error } = await this.db
       .from("contractors")
       .update(payload)
-      .eq("user_id", this.userId)
+      .eq("id", this.userId)
       .select()
       .single();
 
@@ -182,37 +191,36 @@ export class ContractorService {
     return ContractorResponseSchema.parse(data);
   }
 
-  /** Upsert the extended profile (keyed to the contractor row id). */
-  async upsertProfile(
-    contractorId: string,
-    payload: ContractorProfileUpsert,
-  ): Promise<ContractorProfileResponse> {
+  // ── contractor_details ─────────────────────────────────────
+
+  /** Upsert contractor_details (id shared with contractors row). */
+  async upsertDetails(
+    payload: ContractorDetailsUpsert,
+  ): Promise<ContractorDetailsResponse> {
     const { data, error } = await this.db
-      .from("contractor_profiles")
+      .from("contractor_details")
       .upsert(
-        { id: contractorId, ...payload },
+        { id: this.userId, ...payload },
         { onConflict: "id", ignoreDuplicates: false },
       )
       .select()
       .single();
 
     if (error) throw new Error(error.message);
-    return ContractorProfileResponseSchema.parse(data);
+    return ContractorDetailsResponseSchema.parse(data);
   }
 
-  /** Fetch the extended profile for this user's contractor. */
-  async getProfile(
-    contractorId: string,
-  ): Promise<ContractorProfileResponse | null> {
+  /** Fetch contractor_details for the current user. */
+  async getDetails(): Promise<ContractorDetailsResponse | null> {
     const { data, error } = await this.db
-      .from("contractor_profiles")
+      .from("contractor_details")
       .select("*")
-      .eq("id", contractorId)
+      .eq("id", this.userId)
       .maybeSingle();
 
     if (error) throw new Error(error.message);
     if (!data) return null;
-    return ContractorProfileResponseSchema.parse(data);
+    return ContractorDetailsResponseSchema.parse(data);
   }
 }
 
@@ -228,17 +236,19 @@ Deno.serve(async (req: Request) => {
   if (!authHeader?.startsWith("Bearer ")) {
     return errorResponse("Missing or malformed Authorization header", 401);
   }
-  const jwt = authHeader.slice(7);
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
   if (!supabaseUrl || !anonKey) {
-    return errorResponse("Server misconfiguration: missing Supabase env vars", 500);
+    return errorResponse(
+      "Server misconfiguration: missing Supabase env vars",
+      500,
+    );
   }
 
-  // User-scoped client — RLS applies automatically
+  // User-scoped client — all queries run under RLS
   const db = createClient(supabaseUrl, anonKey, {
-    global: { headers: { Authorization: `Bearer ${jwt}` } },
+    global: { headers: { Authorization: authHeader } },
   });
 
   const {
@@ -251,35 +261,25 @@ Deno.serve(async (req: Request) => {
   }
 
   const service = new ContractorService(db, user.id);
-  const url = new URL(req.url);
+  const { pathname } = new URL(req.url);
 
-  // ── Route: /contractors/profile ───────────────────────────────────────────
-  if (url.pathname.endsWith("/contractors/profile")) {
+  // ── Route: /contractors/details ───────────────────────────────────────────
+  if (pathname.endsWith("/contractors/details")) {
     try {
-      const contractor = await service.get();
-      if (!contractor) {
-        return errorResponse(
-          "Contractor record not found. Register first via POST /contractors.",
-          404,
-        );
-      }
-
       if (req.method === "GET") {
-        const profile = await service.getProfile(contractor.id);
-        return jsonResponse(profile ?? { id: contractor.id });
+        const details = await service.getDetails();
+        // Return stub with id so the client always has something to build on
+        return jsonResponse(details ?? { id: user.id });
       }
 
       if (req.method === "POST") {
         const raw = await req.json().catch(() => ({}));
-        const parsed = ContractorProfileUpsertSchema.safeParse(raw);
+        const parsed = ContractorDetailsUpsertSchema.safeParse(raw);
         if (!parsed.success) {
           return jsonResponse({ errors: parsed.error.flatten() }, 422);
         }
-        const profile = await service.upsertProfile(
-          contractor.id,
-          parsed.data,
-        );
-        return jsonResponse(profile, 200);
+        const details = await service.upsertDetails(parsed.data);
+        return jsonResponse(details);
       }
 
       return errorResponse("Method not allowed", 405);
@@ -292,7 +292,7 @@ Deno.serve(async (req: Request) => {
   }
 
   // ── Route: /contractors ───────────────────────────────────────────────────
-  if (url.pathname.endsWith("/contractors")) {
+  if (pathname.endsWith("/contractors")) {
     try {
       if (req.method === "GET") {
         const contractor = await service.get();
@@ -306,7 +306,7 @@ Deno.serve(async (req: Request) => {
         if (!parsed.success) {
           return jsonResponse({ errors: parsed.error.flatten() }, 422);
         }
-        const contractor = await service.upsert(parsed.data);
+        const contractor = await service.register(parsed.data);
         return jsonResponse(contractor, 201);
       }
 
