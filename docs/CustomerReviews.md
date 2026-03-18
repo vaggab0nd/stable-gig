@@ -6,7 +6,7 @@ The review system is modelled on platforms like Uber and Upwork: **both parties 
 
 It is a **double-blind** system — neither party can see what the other wrote until both have submitted, or a 14-day fallback timer expires. This prevents scores being influenced by the other person's review.
 
-Reviews capture **three categorical dimensions** (Cleanliness, Communication, Accuracy) rather than a single star score. An overall rating is automatically generated as their average. A **Claude-powered Edge Function** extracts a Pros/Cons summary from the free-text body and displays it on the contractor's profile.
+Reviews capture **three categorical dimensions** (Quality, Communication, Cleanliness) rather than a single star score. An overall rating is automatically generated as their average. A **Claude-powered Edge Function** extracts a Pros/Cons summary from the free-text body and displays it on the contractor's profile.
 
 ---
 
@@ -29,7 +29,8 @@ Reviews capture **three categorical dimensions** (Cleanliness, Communication, Ac
 | File | What it adds |
 |---|---|
 | `backend/supabase/migrations/005_rating_system.sql` | `reviews` table, double-blind trigger, `visible_reviews` view, rating helpers |
-| `backend/supabase/migrations/006_categorical_ratings.sql` | `escrow_status` on jobs; replaces single `rating` with three sub-ratings; adds `ai_pros_cons` to reviews; adds `ai_review_summary` to `contractor_details`; refreshes view |
+| `backend/supabase/migrations/006_categorical_ratings.sql` | `escrow_status` on jobs; replaces single `rating` with three sub-ratings (Cleanliness/Communication/Accuracy); adds `ai_pros_cons`; adds `ai_review_summary` to `contractor_details` |
+| `backend/supabase/migrations/007_quality_rating_private_feedback.sql` | Renames `rating_accuracy → rating_quality`; adds `private_feedback TEXT` (admin-only, excluded from `visible_reviews`); recreates view and helpers |
 
 ---
 
@@ -86,15 +87,16 @@ reviews (
     reviewee_role        TEXT        'client' | 'contractor'
 
     -- Categorical sub-ratings (all required, 1–5)
-    rating_cleanliness   SMALLINT    1–5
+    rating_quality       SMALLINT    1–5
     rating_communication SMALLINT    1–5
-    rating_accuracy      SMALLINT    1–5
+    rating_cleanliness   SMALLINT    1–5
 
     -- Generated overall rating (read-only)
     rating               NUMERIC(3,2) GENERATED ALWAYS AS avg(sub-ratings)
 
     body                 TEXT        free-text (hidden until revealed)
     ai_pros_cons         JSONB       { pros, cons, one_line_summary } — filled async
+    private_feedback     TEXT        admin-only — never in visible_reviews
     content_visible      BOOLEAN     FALSE until peer reviews or timer expires
     reveal_at            TIMESTAMPTZ submitted_at + 14 days (fallback)
     submitted_at         TIMESTAMPTZ
@@ -105,9 +107,9 @@ reviews (
 
 | Dimension | Client → Contractor | Contractor → Client |
 |---|---|---|
-| **Cleanliness** | How clean was the work area? | How clean / accessible was the property? |
+| **Quality** | How good was the overall standard of work? | How clearly was the job scoped / briefed? |
 | **Communication** | Did they communicate well throughout? | Did the client communicate clearly? |
-| **Accuracy** | Did the final cost match the quote? | Did the job description match what was actually needed? |
+| **Cleanliness** | How clean was the work area afterwards? | How clean / accessible was the property? |
 
 ### Identity mapping
 
@@ -279,6 +281,89 @@ A self-contained vanilla-JS class that handles the complete review flow:
 
 ---
 
+## TradesmanRating — React component
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `frontend/components/TradesmanRating.jsx` | Source (keep in sync) |
+| `backend/static/components/TradesmanRating.jsx` | Deployed copy served by FastAPI |
+
+### What it does
+
+A purpose-built React component (no external UI library) for the full 5-star review submission flow:
+
+- **Escrow gate** — Submit button is `disabled` unless `escrowStatus` is `'released'` or `'funds_released'`; if neither, a locked placeholder is rendered instead of the form
+- **Three star-rating rows** — Quality, Communication, Cleanliness — each with hover effects and a label (`Poor` → `Excellent`)
+- **Live overall badge** — updates in real-time as the user adjusts sub-ratings (matches the DB `GENERATED` column)
+- **Feedback textarea** — optional, 2000-char limit with live counter
+- **Private feedback field** — visually distinct (amber/dashed border), clearly labelled "Admin only — not shown to the tradesman". Sent as `private_feedback` in the INSERT payload; excluded from `visible_reviews`
+- **Structured Supabase insert** via `@supabase/supabase-js` client passed as prop
+
+### Props
+
+| Prop | Type | Required | Description |
+|---|---|---|---|
+| `supabase` | SupabaseClient | ✓ | Pre-initialised `@supabase/supabase-js` client |
+| `jobId` | string | ✓ | Job UUID (transaction anchor) |
+| `reviewerId` | string | ✓ | Current user's UUID |
+| `revieweeId` | string | ✓ | The tradesman's UUID |
+| `reviewerRole` | `'client'`\|`'contractor'` | | Defaults to `'client'` |
+| `revieweeRole` | `'client'`\|`'contractor'` | | Defaults to `'contractor'` |
+| `revieweeName` | string | | Display name shown in the UI |
+| `escrowStatus` | string | ✓ | From your payment layer. Accepts `'released'` or `'funds_released'` |
+| `onSuccess` | `(review) => void` | | Called with the saved row on success |
+| `onError` | `(error) => void` | | Called on Supabase insert error |
+
+### Installation
+
+```bash
+npm install @supabase/supabase-js react react-dom
+```
+
+### Usage
+
+```jsx
+import { createClient } from '@supabase/supabase-js'
+import TradesmanRating from './components/TradesmanRating'
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  global: { headers: { Authorization: `Bearer ${session.access_token}` } },
+})
+
+function JobCompletedPage({ job, currentUser, tradesman }) {
+  return (
+    <TradesmanRating
+      supabase={supabase}
+      jobId={job.id}
+      reviewerId={currentUser.id}
+      revieweeId={tradesman.id}
+      reviewerRole="client"
+      revieweeRole="contractor"
+      revieweeName={tradesman.business_name}
+      escrowStatus={job.escrow_status}       // 'funds_released' unlocks the form
+      onSuccess={(saved) => console.log('Review saved:', saved)}
+    />
+  )
+}
+```
+
+### Private feedback — admin access
+
+The `private_feedback` field is sent in the same INSERT as the rest of the review but is **never returned by `visible_reviews`**. To read it, use the service role key in your admin tooling:
+
+```js
+// Admin API (service role — bypasses RLS)
+const { data } = await adminSupabase
+  .from('reviews')
+  .select('id, reviewer_id, private_feedback, submitted_at')
+  .not('private_feedback', 'is', null)
+  .order('submitted_at', { ascending: false })
+```
+
+---
+
 ## Row Level Security
 
 | Policy | Who | What |
@@ -311,9 +396,9 @@ Both functions return `NULL` if the user has no revealed reviews yet. They only 
 
 ```sql
 SELECT
-    ROUND(AVG(rating_cleanliness),   2) AS avg_cleanliness,
+    ROUND(AVG(rating_quality),       2) AS avg_quality,
     ROUND(AVG(rating_communication), 2) AS avg_communication,
-    ROUND(AVG(rating_accuracy),      2) AS avg_accuracy,
+    ROUND(AVG(rating_cleanliness),   2) AS avg_cleanliness,
     ROUND(AVG(rating),               2) AS avg_overall,
     COUNT(*)                            AS review_count
 FROM visible_reviews
@@ -356,20 +441,22 @@ SELECT EXISTS (
 INSERT INTO reviews (
     job_id, reviewer_id, reviewee_id,
     reviewer_role, reviewee_role,
-    rating_cleanliness, rating_communication, rating_accuracy,
-    body
+    rating_quality, rating_communication, rating_cleanliness,
+    body,
+    private_feedback      -- optional; admin-only, never shown to tradesman
 ) VALUES (
     $job_id, $client_id, $contractor_id,
     'client', 'contractor',
     5, 4, 5,
-    'Excellent work, arrived on time and left the site clean.'
+    'Excellent work, arrived on time and left the site clean.',
+    NULL
 );
 
 -- Contractor reviewing the client
 INSERT INTO reviews (
     job_id, reviewer_id, reviewee_id,
     reviewer_role, reviewee_role,
-    rating_cleanliness, rating_communication, rating_accuracy,
+    rating_quality, rating_communication, rating_cleanliness,
     body
 ) VALUES (
     $job_id, $contractor_id, $client_id,
@@ -384,13 +471,20 @@ The `on_review_submitted` trigger fires automatically. If this is the second rev
 ### 4. Read reviews for a contractor profile page
 
 ```sql
--- All revealed reviews
+-- All revealed reviews (private_feedback excluded by the view)
 SELECT
-    rating_cleanliness, rating_communication, rating_accuracy,
+    rating_quality, rating_communication, rating_cleanliness,
     rating, body, ai_pros_cons, submitted_at
 FROM   visible_reviews
 WHERE  reviewee_id   = $contractor_id
   AND  reviewee_role = 'contractor'
+ORDER BY submitted_at DESC;
+
+-- Admin: read private feedback (service role only, bypasses RLS)
+SELECT id, reviewer_id, private_feedback, submitted_at
+FROM   reviews
+WHERE  reviewee_id   = $contractor_id
+  AND  private_feedback IS NOT NULL
 ORDER BY submitted_at DESC;
 
 -- Aggregated AI summary (from contractor_details)
