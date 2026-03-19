@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     supabase_anon_key: str = ""
     supabase_service_key: str = ""  # Bypasses RLS — admin operations only
 
+    # Anthropic (Claude) — used by the task-breakdown endpoint
+    anthropic_api_key: str = ""
+
     # Smarty address API
     smarty_auth_id: str = ""
     smarty_auth_token: str = ""

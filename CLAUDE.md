@@ -26,6 +26,8 @@ uvicorn main:app --reload --port 8000
 | `backend/Dockerfile` | Container image for Cloud Run |
 | `backend/app/routers/photo_analysis.py` | `POST /analyse/photos` endpoint |
 | `backend/app/services/photo_analyzer.py` | Image load, preprocess, sharpness check, Gemini 1.5 Flash |
+| `backend/app/routers/task_breakdown.py` | `POST /analyse/breakdown` endpoint |
+| `backend/app/services/task_breakdown.py` | Claude Haiku: decompose repair description into ordered task list |
 | `backend/tests/conftest.py` | Shared test fixtures + module stubs |
 | `backend/tests/test_photo_analyzer_service.py` | 32 unit tests for the photo analyzer service |
 | `backend/tests/test_photo_analysis_router.py` | 30 integration tests for the photo analysis endpoint |
@@ -74,7 +76,7 @@ uvicorn main:app --reload --port 8000
 ```bash
 cd backend
 pip install -r requirements.txt -r requirements-test.txt
-pytest            # 62 tests, ~1 s, no API keys needed
+pytest            # 82 tests, ~1 s, no API keys needed
 pytest -v         # verbose output
 ```
 
@@ -84,6 +86,7 @@ pytest -v         # verbose output
 |------|-------|--------|
 | `tests/test_photo_analyzer_service.py` | 32 | Sharpness detection · image loading · preprocessing pipeline (size guard, resize, blur flag, role assignment) · `analyse()` orchestrator |
 | `tests/test_photo_analysis_router.py` | 30 | Request validation · error→HTTP status mapping · happy-path response shape |
+| `tests/test_task_breakdown.py` | 20 | Router error mapping · service validation · prompt content · float coercion · fence stripping |
 
 Gemini and Supabase are never called — all external dependencies are mocked.
 See `tests/conftest.py` for the stubbing strategy and the reason for the `sys.modules` pre-population.
