@@ -46,6 +46,7 @@ _supabase_mock.create_client.return_value = MagicMock()
 # 2. Stub all external service credentials so the app can be imported
 # ---------------------------------------------------------------------------
 os.environ.setdefault("GEMINI_API_KEY",       "test-gemini-key-000")
+os.environ.setdefault("ANTHROPIC_API_KEY",    "test-anthropic-key-000")
 os.environ.setdefault("SUPABASE_URL",         "https://test.supabase.co")
 os.environ.setdefault("SUPABASE_ANON_KEY",    "test-anon-key")
 os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-service-key")

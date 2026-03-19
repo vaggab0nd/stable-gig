@@ -16,6 +16,9 @@ hachoir==3.3.0
 # Image processing — TradePhotoAnalyzer (resize, sharpness detection, JPEG re-encoding)
 Pillow==11.1.0
 
+# Anthropic (Claude) — task breakdown
+anthropic==0.40.0
+
 # Supabase
 supabase==2.10.0
 

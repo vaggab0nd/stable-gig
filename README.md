@@ -30,6 +30,7 @@ Single-service deployment on **Google Cloud Run**:
 | **Contractor registration** | Business name, postcode, phone, activity categories, licence/insurance details |
 | **Job lifecycle** | `open → awarded → in_progress → awaiting_review → completed` |
 | **Escrow gate** | `jobs.escrow_status` (`pending → held → funds_released`) unlocks the review flow |
+| **Task breakdown** | `POST /analyse/breakdown` — Claude decomposes a repair description into an ordered task list with titles, difficulty levels, and estimated durations |
 | **Review system** | Double-blind, transaction-anchored mutual reviews with 14-day fallback reveal |
 | **Categorical ratings** | Quality · Communication · Cleanliness (1–5 each); overall rating auto-generated |
 | **Private feedback** | Admin-only field on every review — never exposed to the tradesman |
@@ -134,7 +135,7 @@ uvicorn main:app --reload --port 8000
 
 ## Tests
 
-62 tests, ~1 s, no API keys or network access needed (Gemini and Supabase are fully mocked).
+82 tests, ~1 s, no API keys or network access needed (Gemini, Anthropic, and Supabase are fully mocked).
 
 ```bash
 cd backend
@@ -147,6 +148,7 @@ pytest -v    # verbose
 |------|-------|--------|
 | `test_photo_analyzer_service.py` | 32 | Sharpness detection · image loading · preprocessing (size guard, resize, blur flag, role assignment) · `analyse()` orchestrator |
 | `test_photo_analysis_router.py`  | 30 | Request validation · error→HTTP status mapping · happy-path response shape |
+| `test_task_breakdown.py`         | 20 | Router error mapping (503/429/502/422) · service validation · prompt content · float coercion · markdown fence stripping |
 
 ---
 
@@ -191,6 +193,40 @@ pytest -v    # verbose
 `trade_category`: optional — one of `plumbing`, `electrical`, `structural`, `damp`, `roofing`, `general`.
 
 Images are preprocessed before Gemini: resized to ≤1200 px, re-encoded as JPEG, sharpness-checked, and assigned positional roles (Wide Shot → Close-up → Scale/Context → Supplemental A/B).
+
+---
+
+### `POST /analyse/breakdown` — repair task list
+
+Takes the output from either analysis endpoint and returns an ordered list of repair tasks. Pass the analysis response fields directly — no transformation required.
+
+```json
+// Request — fields map 1-to-1 from analysis responses
+{
+  "description":        "A dripping tap in the kitchen sink…",
+  "problem_type":       "plumbing",
+  "urgency":            "low",
+  "materials_involved": ["copper pipe", "tap washer"],
+  "required_tools":     ["adjustable spanner"]
+}
+```
+
+```json
+// Response
+{
+  "tasks": [
+    { "title": "Shut off water supply under the sink", "difficulty_level": "easy",   "estimated_minutes": 5  },
+    { "title": "Remove tap handle and packing nut",    "difficulty_level": "medium", "estimated_minutes": 15 },
+    { "title": "Replace worn tap washer",              "difficulty_level": "easy",   "estimated_minutes": 10 },
+    { "title": "Reassemble and test for leaks",        "difficulty_level": "easy",   "estimated_minutes": 10 }
+  ]
+}
+```
+
+`difficulty_level`: `easy` (any DIYer) · `medium` (trade experience needed) · `hard` (specialist / certification required)
+`estimated_minutes`: on-site time only, excludes travel and parts sourcing
+
+Requires `ANTHROPIC_API_KEY` in the environment.
 
 ---
 
