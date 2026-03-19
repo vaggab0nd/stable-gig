@@ -135,12 +135,12 @@ uvicorn main:app --reload --port 8000
 
 ## Tests
 
-82 tests, ~1 s, no API keys or network access needed (Gemini, Anthropic, and Supabase are fully mocked).
+80 tests, ~1 s, no API keys or network access needed (Gemini and Supabase are fully mocked).
 
 ```bash
 cd backend
 pip install -r requirements.txt -r requirements-test.txt
-pytest       # all 62 tests
+pytest       # all 80 tests
 pytest -v    # verbose
 ```
 
@@ -148,7 +148,7 @@ pytest -v    # verbose
 |------|-------|--------|
 | `test_photo_analyzer_service.py` | 32 | Sharpness detection · image loading · preprocessing (size guard, resize, blur flag, role assignment) · `analyse()` orchestrator |
 | `test_photo_analysis_router.py`  | 30 | Request validation · error→HTTP status mapping · happy-path response shape |
-| `test_task_breakdown.py`         | 20 | Router error mapping (503/429/502/422) · service validation · prompt content · float coercion · markdown fence stripping |
+| `test_task_breakdown.py`         | 18 | Router error mapping (429/502/422) · service validation · prompt content · float coercion · markdown fence stripping |
 
 ---
 
@@ -226,7 +226,7 @@ Takes the output from either analysis endpoint and returns an ordered list of re
 `difficulty_level`: `easy` (any DIYer) · `medium` (trade experience needed) · `hard` (specialist / certification required)
 `estimated_minutes`: on-site time only, excludes travel and parts sourcing
 
-Requires `ANTHROPIC_API_KEY` in the environment.
+Uses the same `GEMINI_API_KEY` already required by the video and photo analysers — no additional credentials needed.
 
 ---
 

@@ -19,16 +19,18 @@ description (and optionally the other fields) straight through:
     # After /analyse/photos
     POST /analyse/breakdown
     {
-      "description":   "Rising damp caused by failed DPC at ground level",
-      "urgency":       "high",
+      "description":    "Rising damp caused by failed DPC at ground level",
+      "urgency":        "high",
       "required_tools": ["damp meter", "cold chisel"]
     }
+
+Uses the same GEMINI_API_KEY already required by the video/photo analysers —
+no additional credentials needed.
 """
 
 import logging
 from typing import Literal
 
-import anthropic
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
@@ -104,7 +106,7 @@ class BreakdownResponse(BaseModel):
     summary="Break a repair description into ordered tasks",
     description=(
         "Takes the text output from the video or photo analysis pipeline and asks "
-        "Claude to decompose it into a chronological, actionable task list. "
+        "Gemini to decompose it into a chronological, actionable task list. "
         "Each task includes a title, difficulty level, and estimated duration. "
         "Pass the analysis response fields directly — no transformation needed."
     ),
@@ -133,11 +135,6 @@ async def breakdown(
             required_tools=body.required_tools,
         )
 
-    except RuntimeError as exc:
-        # API key not configured
-        log.error("task_breakdown_config_error", extra={"error": str(exc)})
-        raise HTTPException(status_code=503, detail=str(exc))
-
     except ValueError as exc:
         # Unparseable / structurally invalid AI response
         log.warning("task_breakdown_parse_error", extra={"user_id": user_id, "error": str(exc)})
@@ -146,15 +143,15 @@ async def breakdown(
             detail="AI returned an unexpected response format. Please try again.",
         )
 
-    except anthropic.RateLimitError:
-        log.warning("task_breakdown_rate_limit", extra={"user_id": user_id})
-        raise HTTPException(
-            status_code=429,
-            detail="Claude API rate limit reached. Please try again shortly.",
-        )
-
-    except anthropic.APIError as exc:
-        log.error("task_breakdown_api_error", extra={"user_id": user_id, "error": str(exc)})
+    except Exception as exc:
+        msg = str(exc)
+        if "429" in msg or "quota" in msg.lower() or "rate" in msg.lower():
+            log.warning("task_breakdown_rate_limit", extra={"user_id": user_id, "error": msg})
+            raise HTTPException(
+                status_code=429,
+                detail="Gemini API quota exceeded. Please try again shortly.",
+            )
+        log.error("task_breakdown_api_error", extra={"user_id": user_id, "error": msg})
         raise HTTPException(
             status_code=502,
             detail="Upstream AI service error. Please try again.",

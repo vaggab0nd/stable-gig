@@ -1,26 +1,28 @@
-"""Claude-powered repair task breakdown service.
+"""Gemini-powered repair task breakdown service.
 
 Takes the text output from either analysis pipeline (video or photo) and asks
-Claude to decompose it into an ordered, actionable list of repair tasks — each
+Gemini to decompose it into an ordered, actionable list of repair tasks — each
 with a title, difficulty level, and estimated duration in minutes.
 
-The function is async (uses AsyncAnthropic) so it runs on the event loop
-without blocking the server.
+Uses the same google-generativeai SDK that is already wired up for video and
+photo analysis, so no additional API key is needed.
+
+The inner _call_gemini() function is synchronous (the Gemini SDK is sync-only)
+and is dispatched via asyncio.to_thread so it does not block the event loop.
 """
 
+import asyncio
 import json
 import logging
 import re
 
-import anthropic
+import google.generativeai as genai
 
 from app.config import settings
 
 log = logging.getLogger(__name__)
 
-# Haiku: fast and cheap for a structured text → JSON task; no vision needed here.
-_MODEL = "claude-haiku-4-5-20251001"
-_MAX_TOKENS = 1024
+_MODEL = "gemini-2.0-flash"
 
 # Difficulty vocabulary exposed in the API response schema.
 DIFFICULTY_LEVELS = {"easy", "medium", "hard"}
@@ -71,6 +73,14 @@ Example output shape (do not copy this content):
 {{"tasks": [{{"title": "Turn off water supply", "difficulty_level": "easy", "estimated_minutes": 5}}]}}"""
 
 
+def _call_gemini(prompt: str) -> str:
+    """Synchronous Gemini call. Intended to run via asyncio.to_thread."""
+    genai.configure(api_key=settings.gemini_api_key)
+    model = genai.GenerativeModel(_MODEL)
+    response = model.generate_content(prompt)
+    return response.text
+
+
 async def breakdown(
     description: str,
     problem_type: str | None = None,
@@ -78,22 +88,15 @@ async def breakdown(
     materials_involved: list[str] | None = None,
     required_tools: list[str] | None = None,
 ) -> list[dict]:
-    """Call Claude to decompose *description* into repair tasks.
+    """Ask Gemini to decompose *description* into repair tasks.
 
     Returns a list of dicts, each with keys: title, difficulty_level,
     estimated_minutes.
 
     Raises:
-        RuntimeError: if ANTHROPIC_API_KEY is not configured.
-        ValueError:   if Claude returns unparseable or structurally invalid JSON.
-        anthropic.APIError: on upstream API failures (let the router handle these).
+        ValueError: if Gemini returns unparseable or structurally invalid JSON.
+        Exception:  on upstream API failures (let the router handle these).
     """
-    if not settings.anthropic_api_key:
-        raise RuntimeError(
-            "ANTHROPIC_API_KEY is not configured. "
-            "Add it to your .env file or Cloud Run environment."
-        )
-
     prompt = _build_prompt(
         description=description,
         problem_type=problem_type,
@@ -102,15 +105,8 @@ async def breakdown(
         tools=required_tools,
     )
 
-    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
-
-    message = await client.messages.create(
-        model=_MODEL,
-        max_tokens=_MAX_TOKENS,
-        messages=[{"role": "user", "content": prompt}],
-    )
-
-    raw = (message.content[0].text or "").strip()
+    raw: str = await asyncio.to_thread(_call_gemini, prompt)
+    raw = raw.strip()
 
     # Strip any accidental markdown fences
     if raw.startswith("```"):
@@ -120,19 +116,19 @@ async def breakdown(
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise ValueError(f"Claude returned non-JSON response: {raw[:200]}") from exc
+        raise ValueError(f"Gemini returned non-JSON response: {raw[:200]}") from exc
 
     tasks = parsed.get("tasks")
     if not isinstance(tasks, list) or len(tasks) == 0:
-        raise ValueError(f"Claude response missing 'tasks' array: {raw[:200]}")
+        raise ValueError(f"Gemini response missing 'tasks' array: {raw[:200]}")
 
     validated: list[dict] = []
     for i, task in enumerate(tasks):
         if not isinstance(task, dict):
             raise ValueError(f"Task {i} is not an object")
-        title = task.get("title")
+        title      = task.get("title")
         difficulty = task.get("difficulty_level")
-        minutes = task.get("estimated_minutes")
+        minutes    = task.get("estimated_minutes")
 
         if not isinstance(title, str) or not title.strip():
             raise ValueError(f"Task {i} missing valid 'title'")
@@ -142,7 +138,7 @@ async def breakdown(
                 f"must be one of {sorted(DIFFICULTY_LEVELS)}"
             )
         if not isinstance(minutes, int) or minutes <= 0:
-            # Coerce float → int if Claude slips a decimal in
+            # Coerce float → int if Gemini slips a decimal in
             try:
                 minutes = int(minutes)
                 if minutes <= 0:
@@ -154,19 +150,14 @@ async def breakdown(
 
         validated.append(
             {
-                "title": title.strip(),
-                "difficulty_level": difficulty,
+                "title":             title.strip(),
+                "difficulty_level":  difficulty,
                 "estimated_minutes": minutes,
             }
         )
 
     log.info(
         "task_breakdown_complete",
-        extra={
-            "model": _MODEL,
-            "task_count": len(validated),
-            "input_tokens": message.usage.input_tokens,
-            "output_tokens": message.usage.output_tokens,
-        },
+        extra={"model": _MODEL, "task_count": len(validated)},
     )
     return validated
