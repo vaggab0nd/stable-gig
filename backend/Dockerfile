@@ -19,6 +19,8 @@ USER appuser
 
 # Cloud Run injects $PORT (default 8080); fall back to 8080 locally
 ENV PORT=8080
+# Ensure `app/` package is importable regardless of how uvicorn sets sys.path
+ENV PYTHONPATH=/app
 EXPOSE 8080
 
 # Health-check — Cloud Run will mark the container unhealthy if this fails
