@@ -93,6 +93,10 @@ class _MaxBodySizeMiddleware:
                                     "Please trim the video and try again."
                                 )
                             },
+                            # Explicit CORS header: if somehow this response reaches
+                            # the browser without going through CORSMiddleware (e.g.
+                            # during a GFE bypass edge-case), the header is still set.
+                            headers={"Access-Control-Allow-Origin": "*"},
                         )
                         await response(scope, receive, send)
                         return

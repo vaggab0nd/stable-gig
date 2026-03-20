@@ -1494,9 +1494,10 @@
     // Upload & analyse
     // ------------------------------------------------------------------ //
 
-    // [SECURITY: code-review] Mirror the server-side 350 MB limit client-side so
-    // the user gets instant feedback rather than waiting for the upload to fail.
-    const _MAX_UPLOAD_BYTES = 350 * 1024 * 1024;
+    // [SECURITY: code-review] Cloud Run's load balancer enforces a 32 MB request
+    // body cap before the app runs (no CORS headers on that rejection).  Cap at
+    // 30 MB client-side so users get instant feedback and never hit the GFE wall.
+    const _MAX_UPLOAD_BYTES = 30 * 1024 * 1024;
 
     const dropZone   = document.getElementById("drop-zone");
     const videoInput = document.getElementById("video-input");
@@ -1528,7 +1529,7 @@
       // doesn't wait for a large upload only to get a server-side 413 error.
       if (file.size > _MAX_UPLOAD_BYTES) {
         const sizeMB = (file.size / 1024 / 1024).toFixed(0);
-        renderError(`File is too large (${sizeMB} MB). The maximum upload size is 350 MB — please trim the video and try again.`);
+        renderError(`File is too large (${sizeMB} MB). The maximum upload size is 30 MB — please trim or compress the video and try again.`);
         videoInput.value = "";
         return;
       }
@@ -1558,7 +1559,7 @@
       // via a path that bypassed onFileSelected (e.g. programmatic assignment).
       if (file.size > _MAX_UPLOAD_BYTES) {
         const sizeMB = (file.size / 1024 / 1024).toFixed(0);
-        renderError(`File is too large (${sizeMB} MB). The maximum upload size is 350 MB.`);
+        renderError(`File is too large (${sizeMB} MB). The maximum upload size is 30 MB.`);
         return;
       }
 
@@ -1588,7 +1589,7 @@
           data = await resp.json();
         } catch {
           if (resp.status === 413)
-            throw new Error("Video is too large to upload. Please trim it under 350 MB and try again.");
+            throw new Error("Video is too large to upload. Please trim or compress it under 30 MB and try again.");
           throw new Error(
             `Server returned an unreadable response (HTTP ${resp.status}). ` +
             `Check that GEMINI_API_KEY is set.`
