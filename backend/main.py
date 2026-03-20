@@ -5,8 +5,8 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
+from starlette.datastructures import Headers
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 # [SECURITY: code-review] slowapi provides per-IP rate limiting; the exception
 # handler converts RateLimitExceeded into a standard 429 response.
@@ -61,34 +61,44 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# _MaxBodySizeMiddleware must be registered FIRST so CORSMiddleware (registered
-# last) becomes the outermost layer.  Starlette builds the stack with the
-# last-registered middleware outermost, so every response — including the early
-# 413 from this middleware — is processed by CORSMiddleware before leaving the
-# ASGI server.  The check reads only the Content-Length *header* so the body is
-# never buffered before the rejection goes out.
+# Pure ASGI middleware — intentionally does NOT extend BaseHTTPMiddleware.
+# BaseHTTPMiddleware buffers the entire request body before dispatch(), which
+# breaks multipart file-upload streaming and causes spurious 413 errors even
+# for small files.  This implementation reads only the Content-Length *header*
+# and never touches the body, so upstream handlers receive the stream intact.
+#
+# Registration order: added FIRST so CORSMiddleware (added last) is outermost.
+# Starlette builds the stack with the last-registered middleware outermost, so
+# every response from this middleware — including the early 413 — is wrapped by
+# CORSMiddleware before it leaves the ASGI server.
 _MAX_UPLOAD_BYTES = 350 * 1024 * 1024  # 350 MB — matches the per-route limit
 
 
-class _MaxBodySizeMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        cl = request.headers.get("content-length")
-        if cl:
-            try:
-                if int(cl) > _MAX_UPLOAD_BYTES:
-                    limit_mb = _MAX_UPLOAD_BYTES // (1024 * 1024)
-                    return JSONResponse(
-                        status_code=413,
-                        content={
-                            "detail": (
-                                f"File exceeds the {limit_mb} MB upload limit. "
-                                "Please trim the video and try again."
-                            )
-                        },
-                    )
-            except ValueError:
-                pass
-        return await call_next(request)
+class _MaxBodySizeMiddleware:
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http":
+            cl = Headers(scope=scope).get("content-length")
+            if cl:
+                try:
+                    if int(cl) > _MAX_UPLOAD_BYTES:
+                        limit_mb = _MAX_UPLOAD_BYTES // (1024 * 1024)
+                        response = JSONResponse(
+                            status_code=413,
+                            content={
+                                "detail": (
+                                    f"File exceeds the {limit_mb} MB upload limit. "
+                                    "Please trim the video and try again."
+                                )
+                            },
+                        )
+                        await response(scope, receive, send)
+                        return
+                except ValueError:
+                    pass
+        await self.app(scope, receive, send)
 
 
 app.add_middleware(_MaxBodySizeMiddleware)  # registered first → inner layer
