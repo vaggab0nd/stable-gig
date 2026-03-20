@@ -148,10 +148,15 @@ gcloud run deploy stable-gig \
 
 ### Subsequent deploys (after code changes)
 
+**Step 1 — build and push the image:**
 ```bash
 gcloud builds submit backend/ \
   --tag gcr.io/gen-lang-client-0428658103/stable-gig \
-  --project=gen-lang-client-0428658103 && \
+  --project=gen-lang-client-0428658103
+```
+
+**Step 2 — deploy the new image:**
+```bash
 gcloud run deploy stable-gig \
   --image gcr.io/gen-lang-client-0428658103/stable-gig \
   --platform managed \
