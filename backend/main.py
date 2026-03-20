@@ -4,7 +4,9 @@ import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 
 # [SECURITY: code-review] slowapi provides per-IP rate limiting; the exception
 # handler converts RateLimitExceeded into a standard 429 response.
@@ -65,6 +67,38 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Must be registered AFTER CORSMiddleware so that CORSMiddleware (the last-added
+# middleware) becomes the outermost wrapper.  That way, even when this middleware
+# returns a 413 early, CORSMiddleware still adds Access-Control-Allow-Origin to
+# the response — preventing the browser from misreporting a size error as a CORS
+# error.  The check reads only the Content-Length *header*, so the large body is
+# never buffered or forwarded to Cloud Run's infrastructure.
+_MAX_UPLOAD_BYTES = 350 * 1024 * 1024  # 350 MB — matches the per-route limit
+
+
+class _MaxBodySizeMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        cl = request.headers.get("content-length")
+        if cl:
+            try:
+                if int(cl) > _MAX_UPLOAD_BYTES:
+                    limit_mb = _MAX_UPLOAD_BYTES // (1024 * 1024)
+                    return JSONResponse(
+                        status_code=413,
+                        content={
+                            "detail": (
+                                f"File exceeds the {limit_mb} MB upload limit. "
+                                "Please trim the video and try again."
+                            )
+                        },
+                    )
+            except ValueError:
+                pass
+        return await call_next(request)
+
+
+app.add_middleware(_MaxBodySizeMiddleware)
 
 # --- Routers ---
 app.include_router(analyse.router)
