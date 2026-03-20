@@ -80,6 +80,7 @@ async def analyse_video(
             raise HTTPException(
                 status_code=413,
                 detail=f"File exceeds the {limit_mb} MB upload limit. Please trim the video and try again.",
+                headers={"Access-Control-Allow-Origin": "*"},
             )
         # [SECURITY: code-review] Validate actual file magic bytes on the first chunk,
         # not just the client-supplied Content-Type header which is trivially spoofed.
