@@ -159,6 +159,7 @@ gcloud run deploy stable-gig \
 
 ```bash
 supabase functions deploy analyse
+supabase functions deploy analyse-video
 supabase functions deploy contractors
 supabase functions deploy review-sentiment
 ```
