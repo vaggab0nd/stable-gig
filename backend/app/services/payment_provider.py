@@ -51,6 +51,25 @@ class RefundResult:
     status:    str   # "succeeded" | "pending" | "failed"
 
 
+@dataclass
+class ConnectAccountResult:
+    account_id: str   # e.g. "acct_xxx" — stored in contractor_details.stripe_account_id
+
+
+@dataclass
+class AccountLinkResult:
+    url:        str   # redirect the contractor to this URL
+    expires_at: int   # Unix timestamp
+
+
+@dataclass
+class AccountStatusResult:
+    account_id:        str
+    charges_enabled:   bool
+    payouts_enabled:   bool
+    details_submitted: bool
+
+
 # ---------------------------------------------------------------------------
 # Abstract base
 # ---------------------------------------------------------------------------
@@ -95,6 +114,31 @@ class EscrowProvider(ABC):
 
         Raises ValueError if the signature is invalid.
         """
+
+    @abstractmethod
+    async def create_connect_account(self, email: str, metadata: dict) -> ConnectAccountResult:
+        """Create a new Express connected account and return its ID.
+
+        Called the first time a contractor starts Connect onboarding.
+        The account ID must be stored in contractor_details.stripe_account_id.
+        """
+
+    @abstractmethod
+    async def create_account_link(
+        self,
+        account_id: str,
+        return_url: str,
+        refresh_url: str,
+    ) -> AccountLinkResult:
+        """Create a single-use Account Link for onboarding / re-onboarding.
+
+        The contractor is redirected to AccountLinkResult.url.  The link
+        expires after ~5 minutes; call this endpoint again to get a fresh one.
+        """
+
+    @abstractmethod
+    async def get_account_status(self, account_id: str) -> AccountStatusResult:
+        """Retrieve the current capabilities state of a connected account."""
 
 
 # ---------------------------------------------------------------------------
@@ -182,6 +226,48 @@ class StripeEscrowProvider(EscrowProvider):
         except self._stripe.error.SignatureVerificationError as exc:
             raise ValueError(f"Invalid webhook signature: {exc}") from exc
         return dict(event)
+
+    async def create_connect_account(self, email: str, metadata: dict) -> ConnectAccountResult:
+        def _create():
+            return self._stripe.Account.create(
+                type="express",
+                email=email,
+                metadata=metadata,
+            )
+
+        account = await asyncio.to_thread(_create)
+        log.info("stripe_connect_account_created", extra={"account_id": account.id})
+        return ConnectAccountResult(account_id=account.id)
+
+    async def create_account_link(
+        self,
+        account_id: str,
+        return_url: str,
+        refresh_url: str,
+    ) -> AccountLinkResult:
+        def _create():
+            return self._stripe.AccountLink.create(
+                account=account_id,
+                type="account_onboarding",
+                return_url=return_url,
+                refresh_url=refresh_url,
+            )
+
+        link = await asyncio.to_thread(_create)
+        log.info("stripe_account_link_created", extra={"account_id": account_id})
+        return AccountLinkResult(url=link.url, expires_at=link.expires_at)
+
+    async def get_account_status(self, account_id: str) -> AccountStatusResult:
+        def _retrieve():
+            return self._stripe.Account.retrieve(account_id)
+
+        account = await asyncio.to_thread(_retrieve)
+        return AccountStatusResult(
+            account_id=account_id,
+            charges_enabled=bool(account.charges_enabled),
+            payouts_enabled=bool(account.payouts_enabled),
+            details_submitted=bool(account.details_submitted),
+        )
 
 
 # ---------------------------------------------------------------------------

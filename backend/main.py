@@ -18,7 +18,7 @@ from slowapi.util import get_remote_address
 # at module level, which would fail with ImportError if limiter isn't yet assigned.
 limiter = Limiter(key_func=get_remote_address)
 
-from app.routers import analyse, auth, profiles, address, user_metadata, photo_analysis, task_breakdown, jobs, bids, reviews, rfp, contractor_matching, escrow
+from app.routers import analyse, auth, profiles, address, user_metadata, photo_analysis, task_breakdown, jobs, bids, reviews, rfp, contractor_matching, escrow, contractor_connect
 
 
 class _JsonFormatter(logging.Formatter):
@@ -125,6 +125,7 @@ app.include_router(reviews.router)
 app.include_router(rfp.router)
 app.include_router(contractor_matching.router)
 app.include_router(escrow.router)
+app.include_router(contractor_connect.router)
 
 # --- Frontend ---
 _STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
