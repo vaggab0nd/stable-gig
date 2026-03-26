@@ -38,6 +38,9 @@ def _stub(name: str) -> MagicMock:
 _stub("google.generativeai")
 _stub("google.generativeai.types")
 
+# pywebpush — Web Push library (not available in the test sandbox)
+_stub("pywebpush")
+
 # supabase / gotrue dependency chain
 _supabase_mock = _stub("supabase")
 _supabase_mock.create_client.return_value = MagicMock()
