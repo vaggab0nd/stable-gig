@@ -21,5 +21,10 @@ class Settings(BaseSettings):
     stripe_publishable_key: str = ""   # pk_live_… / pk_test_… (safe to expose to frontend)
     stripe_webhook_secret:  str = ""   # whsec_… from Stripe Dashboard → Webhooks
 
+    # Web Push / VAPID (optional — notifications silently skipped if not set)
+    vapid_private_key:   str = ""  # raw base64url EC private key
+    vapid_public_key:    str = ""  # raw base64url EC public key (sent to browsers)
+    vapid_claims_email:  str = ""  # e.g. "mailto:admin@example.com"
+
 
 settings = Settings()

@@ -28,3 +28,6 @@ slowapi==0.1.9
 
 # Stripe payment processing (escrow layer)
 stripe>=7.0.0
+
+# Web Push notifications (VAPID / RFC 8030)
+pywebpush>=2.0.0

@@ -16,7 +16,7 @@ Auth: all endpoints require a valid Supabase JWT.
 import logging
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.database import get_supabase_admin
@@ -157,7 +157,12 @@ async def get_job(job_id: str, user=Depends(get_current_user)):
 
 
 @router.patch("/{job_id}")
-async def update_job(job_id: str, body: JobPatch, user=Depends(get_current_user)):
+async def update_job(
+    job_id: str,
+    body: JobPatch,
+    background_tasks: BackgroundTasks,
+    user=Depends(get_current_user),
+):
     """
     Update a job's fields or status.  Only the owner can call this.
 
@@ -202,5 +207,12 @@ async def update_job(job_id: str, body: JobPatch, user=Depends(get_current_user)
     if not res.data:
         raise HTTPException(status_code=500, detail="Failed to update job")
 
+    updated_job = res.data[0]
     log.info("job_updated", extra={"user_id": user_id, "job_id": job_id, "updates": list(updates)})
-    return res.data[0]
+
+    # Fire push notifications when a job is published — never blocks the response
+    if updates.get("status") == "open":
+        from app.services.push_service import notify_contractors_of_new_job
+        background_tasks.add_task(notify_contractors_of_new_job, updated_job)
+
+    return updated_job
