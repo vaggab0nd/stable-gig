@@ -1,142 +1,192 @@
-"""Contractor review routes — /reviews."""
+"""Contractor review routes — /reviews.
+
+All reads go through the visible_reviews view, which:
+  • enforces the double-blind (body / ai_pros_cons are NULL until both parties
+    have reviewed or the 14-day timer expires)
+  • never exposes private_feedback (column intentionally absent from the view)
+  • uses correct current column names (rating_cleanliness / rating_communication
+    / rating_quality — not the stale names in the old router)
+
+Auth: POST /reviews requires a valid JWT.
+      GET  /reviews/contractor/{id} requires a valid JWT (review data is
+      personal/commercial — not appropriate for fully anonymous access).
+      GET  /reviews/summary/{id} is intentionally open (aggregate stats
+      shown on public contractor profiles contain no PII).
+"""
+
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 
-from app.database import get_supabase
+from app.database import get_supabase_admin
 from app.dependencies import get_current_user
-from app.models.schemas import ReviewCreate, ReviewResponse, ReviewSummary
 
 router = APIRouter(prefix="/reviews", tags=["reviews"])
+log = logging.getLogger(__name__)
 
-_RATING_KEYS = ("overall", "quality", "timeliness", "communication", "value", "tidiness")
+# Safe column list for reads from the raw reviews table (used only for INSERT
+# response).  private_feedback is deliberately excluded.
+_SAFE_REVIEW_COLUMNS = (
+    "id", "job_id", "reviewer_id", "reviewee_id",
+    "reviewer_role", "reviewee_role",
+    "rating_cleanliness", "rating_communication", "rating_quality", "rating",
+    "body", "ai_pros_cons", "content_visible", "reveal_at", "submitted_at",
+)
+
+# Columns fetched from visible_reviews for the listing endpoint
+_VISIBLE_COLUMNS = ",".join(_SAFE_REVIEW_COLUMNS)
 
 
-@router.post("", response_model=ReviewResponse, status_code=201)
+# ---------------------------------------------------------------------------
+# Request model
+# ---------------------------------------------------------------------------
+
+class ReviewCreate(BaseModel):
+    job_id:               str
+    reviewee_id:          str
+    reviewee_role:        str = Field(..., description="'contractor' or 'client'")
+    reviewer_role:        str = Field(..., description="'client' or 'contractor'")
+    rating_cleanliness:   int = Field(..., ge=1, le=5)
+    rating_communication: int = Field(..., ge=1, le=5)
+    rating_quality:       int = Field(..., ge=1, le=5)
+    body:                 str | None = Field(default=None, max_length=5_000)
+    private_feedback:     str | None = Field(
+        default=None,
+        max_length=2_000,
+        description="Admin-only. Written to the DB but never returned to callers.",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _db():
+    return get_supabase_admin()
+
+
+def _strip_private(row: dict) -> dict:
+    """Remove private_feedback from any dict before returning it to callers."""
+    return {k: v for k, v in row.items() if k != "private_feedback"}
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
+@router.post("", status_code=201)
 async def submit_review(body: ReviewCreate, user=Depends(get_current_user)):
-    """Submit a review for a contractor on a completed job.
+    """Submit a review for the other party on a completed job.
 
-    The caller must be the owner of the referenced job.
-    Only one review per job per reviewer is permitted.
+    private_feedback is accepted in the payload (the TradesmanRating component
+    sends it) and written to the DB, but is never returned in any response.
     """
-    db = get_supabase()
     user_id = str(user.id)
 
-    # Verify the job exists and belongs to this reviewer
-    job = (
-        db.table("jobs")
-        .select("id,user_id")
-        .eq("id", body.job_id)
-        .maybe_single()
-        .execute()
-    )
-    if not job.data:
+    if body.reviewee_role not in {"contractor", "client"}:
+        raise HTTPException(status_code=422, detail="reviewee_role must be 'contractor' or 'client'")
+    if body.reviewer_role not in {"contractor", "client"}:
+        raise HTTPException(status_code=422, detail="reviewer_role must be 'contractor' or 'client'")
+    if body.reviewer_role == body.reviewee_role:
+        raise HTTPException(status_code=422, detail="reviewer_role and reviewee_role must differ")
+
+    # Verify the job exists
+    job_res = _db().table("jobs").select("id, user_id").eq("id", body.job_id).limit(1).execute()
+    if not job_res.data:
         raise HTTPException(status_code=404, detail="Job not found")
-    if job.data["user_id"] != user_id:
-        raise HTTPException(status_code=403, detail="You can only review contractors on your own jobs")
 
-    # Verify the contractor exists
-    contractor = (
-        db.table("contractors")
-        .select("id")
-        .eq("id", body.contractor_id)
-        .maybe_single()
-        .execute()
-    )
-    if not contractor.data:
-        raise HTTPException(status_code=404, detail="Contractor not found")
-
-    # Enforce one review per job per reviewer
+    # Enforce one review per job per reviewer at the application layer
+    # (DB UNIQUE constraint is the backstop)
     existing = (
-        db.table("reviews")
+        _db()
+        .table("reviews")
         .select("id")
         .eq("job_id", body.job_id)
         .eq("reviewer_id", user_id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
     if existing.data:
         raise HTTPException(status_code=409, detail="You have already reviewed this job")
 
-    payload = {**body.model_dump(), "reviewer_id": user_id}
-    result = db.table("reviews").insert(payload).execute()
-    if not result.data:
+    payload = {
+        "job_id":               body.job_id,
+        "reviewer_id":          user_id,
+        "reviewee_id":          body.reviewee_id,
+        "reviewer_role":        body.reviewer_role,
+        "reviewee_role":        body.reviewee_role,
+        "rating_cleanliness":   body.rating_cleanliness,
+        "rating_communication": body.rating_communication,
+        "rating_quality":       body.rating_quality,
+        "body":                 body.body,
+        # private_feedback written to DB but never returned
+        **({"private_feedback": body.private_feedback} if body.private_feedback else {}),
+    }
+
+    res = _db().table("reviews").insert(payload).execute()
+    if not res.data:
+        log.error("review_insert_failed", extra={"user_id": user_id, "job_id": body.job_id})
         raise HTTPException(status_code=500, detail="Failed to save review")
 
-    row = result.data[0]
-    profile = (
-        db.table("profiles")
-        .select("full_name")
-        .eq("id", user_id)
-        .maybe_single()
+    log.info("review_submitted", extra={"user_id": user_id, "job_id": body.job_id})
+    # Never return private_feedback to the caller
+    return _strip_private(res.data[0])
+
+
+@router.get("/contractor/{contractor_id}")
+async def list_contractor_reviews(
+    contractor_id: str,
+    user=Depends(get_current_user),
+):
+    """Return visible reviews for a contractor, newest first.
+
+    Reads from visible_reviews — the double-blind view that:
+      • hides body / ai_pros_cons until both parties have reviewed
+      • never exposes private_feedback
+    Requires auth to prevent bulk-scraping of review content.
+    """
+    res = (
+        _db()
+        .table("visible_reviews")
+        .select(_VISIBLE_COLUMNS)
+        .eq("reviewee_id", contractor_id)
+        .eq("reviewee_role", "contractor")
+        .order("submitted_at", desc=True)
         .execute()
     )
-    row["reviewer_name"] = profile.data.get("full_name") if profile.data else None
-    return row
+    return res.data or []
 
 
-@router.get("/contractor/{contractor_id}", response_model=list[ReviewResponse])
-async def list_contractor_reviews(contractor_id: str):
-    """Return all reviews for a contractor, newest first."""
-    db = get_supabase()
-    result = (
-        db.table("reviews")
-        .select("*")
-        .eq("contractor_id", contractor_id)
-        .order("created_at", desc=True)
-        .execute()
-    )
-    reviews = result.data or []
-
-    if reviews:
-        reviewer_ids = list({r["reviewer_id"] for r in reviews})
-        profiles = (
-            db.table("profiles")
-            .select("id,full_name")
-            .in_("id", reviewer_ids)
-            .execute()
-        )
-        name_map = {p["id"]: p["full_name"] for p in (profiles.data or [])}
-        for r in reviews:
-            r["reviewer_name"] = name_map.get(r["reviewer_id"])
-
-    return reviews
-
-
-@router.get("/summary/{contractor_id}", response_model=ReviewSummary)
+@router.get("/summary/{contractor_id}")
 async def contractor_review_summary(contractor_id: str):
-    """Return aggregated rating averages for a contractor."""
-    db = get_supabase()
-    result = (
-        db.table("reviews")
-        .select(",".join(_RATING_KEYS))
-        .eq("contractor_id", contractor_id)
+    """Return aggregated rating averages for a contractor (public, no auth).
+
+    Only counts reviews that are visible (double-blind lifted or timer expired).
+    Uses correct current column names: rating_cleanliness, rating_communication,
+    rating_quality, rating (generated average).
+    """
+    res = (
+        _db()
+        .table("visible_reviews")
+        .select("rating_cleanliness,rating_communication,rating_quality,rating")
+        .eq("reviewee_id", contractor_id)
+        .eq("reviewee_role", "contractor")
+        .not_is("body", "null")  # only count revealed reviews (body is NULL until revealed)
         .execute()
     )
-    rows = result.data or []
+    rows = res.data or []
     count = len(rows)
 
-    if count == 0:
-        return ReviewSummary(
-            contractor_id=contractor_id,
-            review_count=0,
-            avg_overall=0.0,
-            avg_quality=0.0,
-            avg_timeliness=0.0,
-            avg_communication=0.0,
-            avg_value=0.0,
-            avg_tidiness=0.0,
-        )
-
     def _avg(key: str) -> float:
-        return round(sum(r[key] for r in rows) / count, 2)
+        vals = [r[key] for r in rows if r.get(key) is not None]
+        return round(sum(vals) / len(vals), 2) if vals else 0.0
 
-    return ReviewSummary(
-        contractor_id=contractor_id,
-        review_count=count,
-        avg_overall=_avg("overall"),
-        avg_quality=_avg("quality"),
-        avg_timeliness=_avg("timeliness"),
-        avg_communication=_avg("communication"),
-        avg_value=_avg("value"),
-        avg_tidiness=_avg("tidiness"),
-    )
+    return {
+        "contractor_id":       contractor_id,
+        "review_count":        count,
+        "avg_rating":          _avg("rating"),
+        "avg_cleanliness":     _avg("rating_cleanliness"),
+        "avg_communication":   _avg("rating_communication"),
+        "avg_quality":         _avg("rating_quality"),
+    }
