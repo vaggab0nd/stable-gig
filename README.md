@@ -29,17 +29,21 @@ Single-service backend on **Google Cloud Run** with two separate frontends:
 | **Contractor matching** | `GET /jobs/{id}/contractors/matches` — ranks contractors by cosine similarity between their profile embedding and the job RFP; falls back to activity-category filter if no embeddings exist |
 | **Profile embeddings** | `POST /me/contractor/embed-profile` — contractors generate a Gemini `text-embedding-004` profile vector (768-dim) so they surface in semantic matching |
 | **Auth** | Email + password, magic-link OTP, and Google OAuth via Supabase |
-| **Rate limiting** | 5–10 req/min per IP on auth endpoints (slowapi) |
+| **Rate limiting** | 5/min on AI video analysis; 20/min on photo analysis; 5–10/min on auth endpoints (slowapi) |
 | **Onboarding** | Two-step signup: profile (name, address) + trade interests |
 | **Contractor registration** | Business name, postcode, phone, activity categories, licence/insurance details |
 | **Job lifecycle** | `draft → open → awarded → in_progress → completed \| cancelled` |
 | **Bidding** | Contractors bid on open jobs (`amount_pence` + scope note); homeowner accepts one bid — rejected bids are auto-closed; job moves to `awarded` |
 | **Escrow gate** | `jobs.escrow_status` (`pending → held → funds_released`) unlocks the review flow |
 | **Task breakdown** | `POST /analyse/breakdown` — Gemini decomposes a repair description into an ordered task list with titles, difficulty levels, and estimated durations |
+| **Anonymous Q&A** | Contractors ask clarifying questions per job (`GET/POST /jobs/{id}/questions`); homeowner answers; contractor identity anonymised as "Contractor N" in homeowner view |
+| **Web Push notifications** | When a job is published, contractors with matching activity categories receive a browser/PWA push notification (RFC 8030 + VAPID); requires `VAPID_*` env vars |
+| **Milestone photo evidence** | Homeowner defines milestones on a job; contractor submits photo evidence per milestone; homeowner approves or rejects; optional AI analysis of submission |
 | **Review system** | Double-blind, transaction-anchored mutual reviews with 14-day fallback reveal |
 | **Categorical ratings** | Quality · Communication · Cleanliness (1–5 each); overall rating auto-generated |
 | **Private feedback** | Admin-only field on every review — never exposed to the tradesman |
 | **AI review summary** | Claude Haiku extracts Pros/Cons from review text; aggregated profile-level summary stored on `contractor_details` |
+| **Reviews RLS hardening** | Column-level REVOKE on `private_feedback`; narrowly-scoped SELECT policies (own submission + revealed about me); double-blind enforced at row level |
 | **Progressive Web App** | Lovable frontend ships a web manifest + service worker; installable on iOS and Android home screen for a native-app feel |
 
 ---
@@ -59,8 +63,17 @@ backend/
 │   ├── dependencies.py                  # get_current_user / get_optional_user
 │   ├── models/schemas.py                # Shared Pydantic models
 │   ├── routers/
-│   │   ├── analyse.py                   # POST /analyse          (video)
-│   │   ├── photo_analysis.py            # POST /analyse/photos   (photos)
+│   │   ├── analyse.py                   # POST /analyse          (video, rate-limited)
+│   │   ├── photo_analysis.py            # POST /analyse/photos   (photos, rate-limited)
+│   │   ├── task_breakdown.py            # POST /analyse/breakdown
+│   │   ├── jobs.py                      # POST/GET /jobs, GET/PATCH /jobs/{id}
+│   │   ├── bids.py                      # POST/GET /jobs/{id}/bids, PATCH bid, GET /me/bids
+│   │   ├── reviews.py                   # POST /reviews, GET /reviews/contractor/{id}, summary
+│   │   ├── questions.py                 # GET/POST /jobs/{id}/questions, PATCH answer
+│   │   ├── notifications.py             # GET vapid-key, POST/DELETE /notifications/subscribe
+│   │   ├── milestones.py                # POST/GET milestones, photos, PATCH approve/reject
+│   │   ├── rfp.py                       # POST /jobs/{id}/rfp
+│   │   ├── contractor_matching.py       # GET /jobs/{id}/contractors/matches
 │   │   ├── auth.py                      # POST /auth/*
 │   │   ├── profiles.py                  # GET/PATCH /me/profile
 │   │   ├── user_metadata.py             # GET/PATCH /me/metadata
@@ -68,6 +81,8 @@ backend/
 │   └── services/
 │       ├── gemini.py                    # Video → Gemini 2.0 Flash
 │       ├── photo_analyzer.py            # Photos → Gemini 1.5 Flash
+│       ├── task_breakdown.py            # Repair task list via Gemini
+│       ├── push_service.py              # Web Push (pywebpush + VAPID)
 │       ├── video_meta.py                # hachoir + mutagen metadata extraction
 │       └── smarty.py                    # Smarty address autocomplete / ZIP lookup
 ├── static/
@@ -83,11 +98,27 @@ backend/
 │       ├── 004_clean_split.sql          # contractor_details, Clean Split redesign
 │       ├── 005_rating_system.sql        # reviews, double-blind trigger, visible_reviews
 │       ├── 006_categorical_ratings.sql  # escrow_status, sub-ratings, ai_pros_cons
-│       └── 007_quality_rating_private_feedback.sql  # quality sub-rating, private_feedback
+│       ├── 007_quality_rating_private_feedback.sql  # quality sub-rating, private_feedback
+│       ├── 008_private_feedback_column_security.sql # column-level REVOKE on private_feedback
+│       ├── 009_jobs_analysis_result.sql # jobs.analysis_result JSONB
+│       ├── 010_bidding_status_expansion.sql # full draft→open→awarded→in_progress→completed|cancelled
+│       ├── 011_rfp_and_embeddings.sql   # rfp_content JSONB, profile_embedding vector(768)
+│       ├── 012_escrow_transactions.sql  # escrow_transactions table
+│       ├── 013_job_questions.sql        # job_questions table (anonymous contractor Q&A)
+│       ├── 014_push_subscriptions.sql   # push_subscriptions table (Web Push VAPID)
+│       ├── 015_job_milestones.sql       # job_milestones + milestone_photos tables
+│       └── 016_reviews_rls_hardening.sql # drop USING(true) policy; narrowly-scoped SELECT policies
 └── tests/
     ├── conftest.py
     ├── test_photo_analyzer_service.py   # 32 unit tests
-    └── test_photo_analysis_router.py    # 30 integration tests
+    ├── test_photo_analysis_router.py    # 30 integration tests
+    ├── test_task_breakdown.py           # 18 tests
+    ├── test_jobs_bids_router.py         # 30 tests
+    ├── test_reviews_router.py           # 17 tests
+    ├── test_questions_router.py         # 13 tests
+    ├── test_notifications_router.py     # 8 tests
+    ├── test_milestones_router.py        # 17 tests
+    └── test_push_service.py             # 8 tests
 
 frontend/
 ├── index.html                           # Local dev copy — keep in sync with backend/static/
@@ -132,7 +163,10 @@ uvicorn main:app --reload --port 8000
 | `ANTHROPIC_API_KEY` | For reviews | `review-sentiment` Edge Function (add in Supabase secrets) |
 | `SUPABASE_URL` | For auth + DB | FastAPI + all Edge Functions |
 | `SUPABASE_ANON_KEY` | For auth + DB | FastAPI + Edge Functions |
-| `SUPABASE_SERVICE_KEY` | For admin ops | `review-sentiment` Edge Function (bypasses RLS) |
+| `SUPABASE_SERVICE_KEY` | For admin ops | FastAPI (admin writes) + `review-sentiment` Edge Function (bypasses RLS) |
+| `VAPID_PRIVATE_KEY` | For push | Web Push — base64url-encoded EC private key; omit to disable push |
+| `VAPID_PUBLIC_KEY` | For push | Web Push — sent to browsers for subscription; exposed via `GET /notifications/vapid-public-key` |
+| `VAPID_CLAIMS_EMAIL` | For push | Included in VAPID JWT, e.g. `mailto:admin@example.com` |
 | `SMARTY_AUTH_ID` / `SMARTY_AUTH_TOKEN` | No | Address autocomplete (omit to disable) |
 
 > **Edge Function secrets** are set separately in the Supabase Dashboard → Project Settings → Edge Functions → Secrets (not in `.env`).
@@ -141,20 +175,26 @@ uvicorn main:app --reload --port 8000
 
 ## Tests
 
-80 tests, ~1 s, no API keys or network access needed (Gemini and Supabase are fully mocked).
+400+ tests, ~2 s, no API keys or network access needed (all external services fully mocked).
 
 ```bash
 cd backend
 pip install -r requirements.txt -r requirements-test.txt
-pytest       # all 80 tests
+pytest       # all tests
 pytest -v    # verbose
 ```
 
 | File | Tests | Covers |
 |------|-------|--------|
-| `test_photo_analyzer_service.py` | 32 | Sharpness detection · image loading · preprocessing (size guard, resize, blur flag, role assignment) · `analyse()` orchestrator |
-| `test_photo_analysis_router.py`  | 30 | Request validation · error→HTTP status mapping · happy-path response shape |
-| `test_task_breakdown.py`         | 18 | Router error mapping (429/502/422) · service validation · prompt content · float coercion · markdown fence stripping |
+| `test_photo_analyzer_service.py`  | 32 | Sharpness detection · image loading · preprocessing (size guard, resize, blur flag, role assignment) · `analyse()` orchestrator |
+| `test_photo_analysis_router.py`   | 30 | Request validation · error→HTTP status mapping · happy-path response shape |
+| `test_task_breakdown.py`          | 18 | Router error mapping (429/502/422) · service validation · prompt content · float coercion · markdown fence stripping |
+| `test_jobs_bids_router.py`        | 30 | Job CRUD · status transitions · contractor bid placement · accept/reject · auth guards |
+| `test_reviews_router.py`          | 17 | Submit review · private_feedback stripped · duplicate detection · list + summary endpoints |
+| `test_questions_router.py`        | 13 | Contractor Q&A · anonymisation · owner answers · auth guards |
+| `test_notifications_router.py`    |  8 | VAPID key endpoint · subscribe/unsubscribe · VAPID-not-configured 503 |
+| `test_milestones_router.py`       | 17 | Create milestones · list with photos · contractor photo submit · approve/reject |
+| `test_push_service.py`            |  8 | VAPID config check · no-contractors skip · no-subscriptions skip · send + dead-subscription cleanup |
 
 ---
 
@@ -303,11 +343,19 @@ psql $DATABASE_URL -f backend/supabase/migrations/001_initial_schema.sql
 | `001_initial_schema` | `profiles`, auth trigger |
 | `002_user_metadata` | `user_metadata` |
 | `003_contractor_onboarding` | `jobs`, `contractors`, `bids` |
-| `004_clean_split` | `contractor_details`, Clean Split identity design |
+| `004_clean_split` | `contractor_details`, Clean Split identity design (`contractors.id = auth.users.id`) |
 | `005_rating_system` | `reviews`, double-blind trigger, `visible_reviews` view, `contractor_rating()` / `client_rating()` helpers |
 | `006_categorical_ratings` | `jobs.escrow_status`; sub-ratings (Cleanliness · Communication · Accuracy); `reviews.ai_pros_cons`; `contractor_details.ai_review_summary` |
 | `007_quality_rating_private_feedback` | Renames `rating_accuracy → rating_quality`; adds `reviews.private_feedback` (admin-only, excluded from `visible_reviews`) |
 | `008_private_feedback_column_security` | Column-level `REVOKE SELECT (private_feedback)` from `authenticated`/`anon`; explicit column grants for all other fields |
+| `009_jobs_analysis_result` | `jobs.analysis_result JSONB` — stores Gemini analysis output with the job |
+| `010_bidding_status_expansion` | Expands `jobs.status` to full lifecycle: `draft \| open \| awarded \| in_progress \| completed \| cancelled` |
+| `011_rfp_and_embeddings` | `jobs.rfp_content JSONB`; `contractors.profile_embedding vector(768)` for semantic matching |
+| `012_escrow_transactions` | `escrow_transactions` audit table |
+| `013_job_questions` | `job_questions` — anonymous contractor Q&A per job; RLS: owner sees all, contractor sees own |
+| `014_push_subscriptions` | `push_subscriptions` — Web Push endpoint/key storage per user; UNIQUE on `(user_id, endpoint)` |
+| `015_job_milestones` | `job_milestones` + `milestone_photos` — homeowner-defined milestones with contractor photo evidence |
+| `016_reviews_rls_hardening` | Drops any `USING (true)` SELECT policy; adds narrowly-scoped policies (own submission + revealed about me); re-asserts column-level REVOKE |
 
 Apply: `supabase db push` or run each file manually with `psql`.
 

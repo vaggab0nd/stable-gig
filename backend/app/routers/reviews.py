@@ -179,7 +179,8 @@ async def contractor_review_summary(contractor_id: str):
     count = len(rows)
 
     def _avg(key: str) -> float:
-        vals = [r[key] for r in rows if r.get(key) is not None]
+        # Supabase returns NUMERIC/GENERATED columns as strings; cast to float.
+        vals = [float(r[key]) for r in rows if r.get(key) is not None]
         return round(sum(vals) / len(vals), 2) if vals else 0.0
 
     return {

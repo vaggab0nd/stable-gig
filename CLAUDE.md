@@ -32,11 +32,21 @@ uvicorn main:app --reload --port 8000
 | `backend/app/services/photo_analyzer.py` | Image load, preprocess, sharpness check, Gemini 1.5 Flash |
 | `backend/app/routers/task_breakdown.py` | `POST /analyse/breakdown` endpoint |
 | `backend/app/services/task_breakdown.py` | Claude Haiku: decompose repair description into ordered task list |
-| `backend/app/routers/jobs.py` | `POST/GET /jobs`, `GET/PATCH /jobs/{id}` — homeowner job lifecycle |
+| `backend/app/routers/jobs.py` | `POST/GET /jobs`, `GET/PATCH /jobs/{id}` — homeowner job lifecycle; fires push notification on publish |
 | `backend/app/routers/bids.py` | `POST/GET /jobs/{id}/bids`, `PATCH /jobs/{id}/bids/{bid_id}`, `GET /me/bids` — contractor bidding |
-| `backend/tests/conftest.py` | Shared test fixtures + module stubs |
+| `backend/app/routers/reviews.py` | `POST /reviews`, `GET /reviews/contractor/{id}`, `GET /reviews/summary/{id}` — double-blind review flow |
+| `backend/app/routers/questions.py` | Anonymous contractor Q&A per job; homeowner sees "Contractor N" labels |
+| `backend/app/routers/notifications.py` | VAPID public key endpoint; push subscription upsert/delete |
+| `backend/app/routers/milestones.py` | Homeowner-defined milestones; contractor photo evidence; homeowner approve/reject |
+| `backend/app/services/push_service.py` | `notify_contractors_of_new_job()` — Web Push via pywebpush (RFC 8030 + VAPID) |
+| `backend/tests/conftest.py` | Shared test fixtures + module stubs (pywebpush, google.generativeai, supabase) |
 | `backend/tests/test_photo_analyzer_service.py` | 32 unit tests for the photo analyzer service |
 | `backend/tests/test_photo_analysis_router.py` | 30 integration tests for the photo analysis endpoint |
+| `backend/tests/test_reviews_router.py` | 17 tests for the reviews router |
+| `backend/tests/test_questions_router.py` | 13 tests for the questions router |
+| `backend/tests/test_notifications_router.py` | 8 tests for the notifications router |
+| `backend/tests/test_milestones_router.py` | 17 tests for the milestones router |
+| `backend/tests/test_push_service.py` | 8 tests for the push notification service |
 
 ### Frontend — FastAPI-served SPA
 
@@ -80,6 +90,12 @@ A separate React app developed and hosted in **Lovable**. Source lives in the Lo
 | `backend/supabase/migrations/008_private_feedback_column_security.sql` | Column-level `REVOKE SELECT (private_feedback)` from `authenticated`/`anon`; re-grants all other columns |
 | `backend/supabase/migrations/009_jobs_analysis_result.sql` | `jobs.analysis_result JSONB` — stores Gemini output with the job so it survives page refresh |
 | `backend/supabase/migrations/010_bidding_status_expansion.sql` | Expands `jobs.status` to `draft \| open \| awarded \| in_progress \| completed \| cancelled` |
+| `backend/supabase/migrations/011_rfp_and_embeddings.sql` | `jobs.rfp_content JSONB`; `contractors.profile_embedding vector(768)` for semantic matching |
+| `backend/supabase/migrations/012_escrow_transactions.sql` | `escrow_transactions` audit table |
+| `backend/supabase/migrations/013_job_questions.sql` | `job_questions` — anonymous contractor Q&A; RLS: owner sees all, contractor sees own |
+| `backend/supabase/migrations/014_push_subscriptions.sql` | `push_subscriptions` — Web Push endpoint/key per user; UNIQUE on `(user_id, endpoint)` |
+| `backend/supabase/migrations/015_job_milestones.sql` | `job_milestones` + `milestone_photos` — photo evidence per milestone |
+| `backend/supabase/migrations/016_reviews_rls_hardening.sql` | Drops USING(true) SELECT policies; adds narrowly-scoped policies; re-asserts column REVOKE |
 
 ### Other
 
@@ -94,7 +110,7 @@ A separate React app developed and hosted in **Lovable**. Source lives in the Lo
 ```bash
 cd backend
 pip install -r requirements.txt -r requirements-test.txt
-pytest            # 292 tests, ~2 s, no API keys needed
+pytest            # 400+ tests, ~2 s, no API keys needed
 pytest -v         # verbose output
 ```
 
@@ -106,8 +122,13 @@ pytest -v         # verbose output
 | `tests/test_photo_analysis_router.py` | 30 | Request validation · error→HTTP status mapping · happy-path response shape |
 | `tests/test_task_breakdown.py` | 18 | Router error mapping · service validation · prompt content · float coercion · fence stripping |
 | `tests/test_jobs_bids_router.py` | 30 | Job CRUD · status transitions · contractor bid placement · accept/reject · auth guards |
+| `tests/test_reviews_router.py` | 17 | Submit review · private_feedback stripped · duplicate detection · list + summary endpoints |
+| `tests/test_questions_router.py` | 13 | Contractor Q&A · anonymisation · owner answers · auth guards |
+| `tests/test_notifications_router.py` | 8 | VAPID key endpoint · subscribe/unsubscribe · VAPID-not-configured 503 |
+| `tests/test_milestones_router.py` | 17 | Create milestones · list with photos · contractor photo submit · approve/reject |
+| `tests/test_push_service.py` | 8 | VAPID config check · no-contractors skip · send + dead-subscription cleanup |
 
-Gemini and Supabase are never called — all external dependencies are mocked.
+Gemini, Supabase, and pywebpush are never called — all external dependencies are mocked.
 See `tests/conftest.py` for the stubbing strategy and the reason for the `sys.modules` pre-population.
 
 ## Architecture notes
@@ -124,6 +145,11 @@ See `tests/conftest.py` for the stubbing strategy and the reason for the `sys.mo
 - **Photo analysis auth**: `POST /analyse/photos` requires a valid Supabase JWT (`get_current_user`). The video endpoint `POST /analyse` allows unauthenticated access (public demo).
 - **Video metadata**: extracted locally before uploading to Gemini using `hachoir` (technical metadata) and `mutagen` (embedded MP4 tags). Both fail silently — best-effort only.
 - **Bidding framework**: jobs start as `draft`, homeowner publishes to `open` (visible to all contractors), contractors submit bids (`amount_pence` + `note`), homeowner accepts one bid (job moves to `awarded`, all other bids rejected), then `in_progress → completed`. All bid endpoints require JWT auth; DB writes use service-role client to bypass RLS with Python-level ownership checks.
+- **Anonymous Q&A**: contractors ask questions on `open`/`awarded`/`in_progress` jobs; homeowner sees stable "Contractor N" labels; contractor identity is never exposed to the homeowner.
+- **Web Push**: when a homeowner publishes a job (`draft → open`), `notify_contractors_of_new_job()` fires as a BackgroundTask, queries contractors with matching `activities`, fetches their `push_subscriptions`, and sends VAPID-signed push notifications. Requires `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY`, `VAPID_CLAIMS_EMAIL` in environment. Dead subscriptions (404/410 responses) are cleaned up automatically.
+- **Milestone photo evidence**: homeowner defines ordered milestones on `awarded`/`in_progress` jobs; accepted contractor uploads photo evidence; milestone moves `pending → submitted`; homeowner approves or rejects. Optional AI analysis available via `?analyse=true`.
+- **Reviews RLS hardening** (migration 016): any `USING (true)` SELECT policy is dropped; two narrowly-scoped policies replace it — reviewers can always read their own submission, reviewees can read reviews about them only after the double-blind lifts. Column-level `REVOKE SELECT (private_feedback)` is re-asserted as belt-and-braces.
+- **Clean Split identity**: `contractors.id = auth.users.id` — the contractor PK is the Supabase auth UUID. There is no separate `user_id` column on `contractors`. All contractor lookups in Python use `.eq("id", user_id)`.
 
 ## Deploying to Cloud Run (manual)
 
