@@ -31,6 +31,8 @@ Reviews capture **three categorical dimensions** (Quality, Communication, Cleanl
 | `backend/supabase/migrations/005_rating_system.sql` | `reviews` table, double-blind trigger, `visible_reviews` view, rating helpers |
 | `backend/supabase/migrations/006_categorical_ratings.sql` | `escrow_status` on jobs; replaces single `rating` with three sub-ratings (Cleanliness/Communication/Accuracy); adds `ai_pros_cons`; adds `ai_review_summary` to `contractor_details` |
 | `backend/supabase/migrations/007_quality_rating_private_feedback.sql` | Renames `rating_accuracy → rating_quality`; adds `private_feedback TEXT` (admin-only, excluded from `visible_reviews`); recreates view and helpers |
+| `backend/supabase/migrations/008_private_feedback_column_security.sql` | Column-level `REVOKE SELECT (private_feedback)` from `authenticated`/`anon`; explicit `GRANT SELECT` for all other columns |
+| `backend/supabase/migrations/016_reviews_rls_hardening.sql` | Drops any broad `USING (true)` SELECT policy; adds `"reviews: select own submission"` and `"reviews: select revealed about me"` policies; re-asserts column REVOKE as belt-and-braces |
 
 ---
 
@@ -40,17 +42,19 @@ Two independent state machines run on the `jobs` table:
 
 ### `status` — job progress
 ```
-open → awarded → in_progress → awaiting_review → completed | cancelled
+draft → open → awarded → in_progress → completed | cancelled
 ```
 
 | Status | Meaning |
 |---|---|
+| `draft` | Job created, not yet visible to contractors |
 | `open` | Job posted, accepting bids |
 | `awarded` | A bid has been accepted |
 | `in_progress` | Work has started |
-| `awaiting_review` | Work is done — both parties are prompted to review |
-| `completed` | Both reviews submitted (trigger advances this automatically) |
+| `completed` | Work done and both reviews submitted (trigger advances this) |
 | `cancelled` | Job cancelled at any stage |
+
+> **Note:** status transitions are controlled by the homeowner via `PATCH /jobs/{id}`. Allowed transitions: `draft → open \| cancelled`, `open → cancelled`, `awarded → in_progress \| cancelled`, `in_progress → completed \| cancelled`.
 
 ### `escrow_status` — payment state
 ```
@@ -368,11 +372,13 @@ const { data } = await adminSupabase
 
 | Policy | Who | What |
 |---|---|---|
-| `reviews: insert own` | Anyone | Can insert only if `reviewer_id = auth.uid()` |
-| `reviews: select own submission` | Reviewer | Can always read their own review (before and after reveal) |
-| `reviews: select revealed about me` | Reviewee | Can read reviews about them only after `content_visible = TRUE` or `reveal_at` has passed |
+| `reviews: insert own` | Authenticated | Can insert only if `reviewer_id = auth.uid()` |
+| `reviews: select own submission` | Reviewer | Can always read their own review (before and after reveal); `USING (auth.uid() = reviewer_id)` |
+| `reviews: select revealed about me` | Reviewee | Can read reviews about them only after `content_visible = TRUE` or `reveal_at <= NOW()`; `USING (auth.uid() = reviewee_id AND (content_visible OR reveal_at <= NOW()))` |
 | *(no UPDATE policy)* | — | Reviews cannot be edited after submission |
 | *(no DELETE policy)* | — | Reviews cannot be deleted by users |
+
+> **Migration 016** hardened this by dropping any auto-generated `USING (true)` policies that Supabase's dashboard may have created. Both correct SELECT policies are recreated in a clean state and the column-level `REVOKE SELECT (private_feedback)` is re-asserted to remain effective even if a future dashboard action adds a broad table-level grant.
 
 Service-role / admin access bypasses RLS as normal (e.g. for moderation or the sentiment Edge Function).
 

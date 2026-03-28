@@ -98,12 +98,13 @@ async def notify_contractors_of_new_job(job: dict) -> None:
 
     db = get_supabase_admin()
 
-    # 1. Find contractors whose activities array contains this job's activity
+    # 1. Find contractors whose activities array contains this job's activity.
+    # Under Clean Split, contractors.id = auth.users.id — no user_id column.
     try:
         contractor_res = (
             db
             .table("contractors")
-            .select("id, user_id")
+            .select("id")
             .contains("activities", [activity])
             .execute()
         )
@@ -115,7 +116,7 @@ async def notify_contractors_of_new_job(job: dict) -> None:
         log.info("push_no_matching_contractors", extra={"job_id": job_id, "activity": activity})
         return
 
-    user_ids = [c["user_id"] for c in contractor_res.data]
+    user_ids = [c["id"] for c in contractor_res.data]
 
     # 2. Fetch their push subscriptions (may be multiple per user)
     try:
