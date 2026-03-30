@@ -114,6 +114,44 @@ app.add_middleware(  # registered last → outermost layer, wraps _MaxBodySizeMi
     allow_headers=["*"],
 )
 
+
+# --- Startup health checks ---
+@app.on_event("startup")
+async def startup_checks():
+    """Log configuration status for optional services."""
+    from app.config import settings
+    from app.services.push_service import _vapid_configured
+    
+    if not _vapid_configured():
+        log.error(
+            "CRITICAL: VAPID not configured. Push notifications disabled.",
+            extra={
+                "hint": "Set VAPID_PRIVATE_KEY, VAPID_PUBLIC_KEY, VAPID_CLAIMS_EMAIL in environment.",
+            },
+        )
+    
+    if not settings.stripe_secret_key:
+        log.warning("Stripe secret key not configured. Payment processing disabled.")
+
+
+# --- Feature flags endpoint ---
+@app.get("/config/feature-flags", tags=["config"])
+async def feature_flags():
+    """Return the status of optional features.
+    
+    Frontend can use this to gracefully degrade (e.g., hide push-notification buttons
+    if push is disabled) without making extra API calls.
+    """
+    from app.config import settings
+    from app.services.push_service import _vapid_configured
+    
+    return {
+        "push_notifications_enabled": _vapid_configured(),
+        "stripe_enabled": bool(settings.stripe_secret_key),
+        "smarty_address_enabled": bool(settings.smarty_auth_id),
+    }
+
+
 # --- Routers ---
 app.include_router(analyse.router)
 app.include_router(photo_analysis.router)   # TradePhotoAnalyzer — POST /analyse/photos

@@ -26,6 +26,9 @@ httpx==0.27.2
 # brute-force and email-bombing attacks.
 slowapi==0.1.9
 
+# Resilience — exponential backoff retry for external API calls
+tenacity>=8.0.0,<9.0.0
+
 # Stripe payment processing (escrow layer)
 stripe>=7.0.0
 
