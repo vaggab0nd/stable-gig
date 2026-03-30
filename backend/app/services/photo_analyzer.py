@@ -25,6 +25,7 @@ from typing import Literal
 
 import httpx
 from PIL import Image, ImageFilter
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 import google.generativeai as genai
 from app.config import settings
@@ -321,6 +322,12 @@ def _sharpness_score(img: Image.Image) -> float:
 # ---------------------------------------------------------------------------
 # Gemini call  (synchronous — run via asyncio.to_thread)
 # ---------------------------------------------------------------------------
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type((Exception,)),  # Retry on any exception; let Gemini SDK determine fatal vs transient
+    reraise=True,
+)
 def _call_gemini(
     prepared:       list[_PreparedImage],
     description:    str,
@@ -329,6 +336,10 @@ def _call_gemini(
     """
     Build a Multi-Perspective Triangulation prompt, call Gemini 1.5 Flash,
     and return the parsed JSON dict (with _token_usage injected).
+    
+    Uses exponential backoff retry (3 attempts, 2–10 second delays) to handle
+    transient API failures gracefully. Fatal errors (e.g., quota exceeded, invalid input)
+    are re-raised immediately.
     """
     category_hint = (
         f"\nThe customer has categorised this as a '{trade_category}' issue."

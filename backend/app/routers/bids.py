@@ -241,6 +241,55 @@ async def action_bid(
     }
 
 
+@router.delete("/jobs/{job_id}/bids/{bid_id}", status_code=200)
+async def delete_bid(job_id: str, bid_id: str, user=Depends(get_current_user)):
+    """Soft-delete a bid (only the contractor who placed it can delete).
+    
+    Soft deletion is allowed only on pending bids (not accepted/rejected).
+    The bid row is marked with deleted_at + deleted_by_user_id for audit trail,
+    but remains in the database for dispute resolution. RLS policies automatically
+    exclude soft-deleted rows from user-facing queries.
+    """
+    user_id = str(user.id)
+    
+    # Verify the bid exists and belongs to the current user
+    bid = _get_bid_or_404(bid_id, job_id)
+    
+    contractor_res = _db().table("contractors").select("id").eq("id", user_id).limit(1).execute()
+    if not contractor_res.data:
+        raise HTTPException(status_code=403, detail="Only registered contractors can delete bids")
+    
+    contractor_id = contractor_res.data[0]["id"]
+    if bid["contractor_id"] != contractor_id:
+        raise HTTPException(status_code=403, detail="You can only delete your own bids")
+    
+    # Prevent deletion of accepted/rejected bids (audit trail protection)
+    if bid["status"] != "pending":
+        raise HTTPException(
+            status_code=422,
+            detail=f"Cannot delete a '{bid['status']}' bid. Only pending bids can be withdrawn.",
+        )
+    
+    # Soft delete: mark with timestamp + user ID
+    deleted_bid = (
+        _db()
+        .table("bids")
+        .update({
+            "deleted_at":          "now()",
+            "deleted_by_user_id":  user_id,
+        })
+        .eq("id", bid_id)
+        .execute()
+    )
+    
+    if not deleted_bid.data:
+        log.error("bid_delete_failed", extra={"user_id": user_id, "bid_id": bid_id})
+        raise HTTPException(status_code=500, detail="Failed to delete bid")
+    
+    log.info("bid_deleted", extra={"user_id": user_id, "job_id": job_id, "bid_id": bid_id})
+    return {"status": "deleted", "bid_id": bid_id}
+
+
 @router.get("/me/bids")
 async def my_bids(user=Depends(get_current_user)):
     """Contractor sees all their bids across all jobs, newest first."""

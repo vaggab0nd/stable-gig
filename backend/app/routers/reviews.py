@@ -158,6 +158,51 @@ async def list_contractor_reviews(
     return res.data or []
 
 
+@router.delete("/{review_id}", status_code=200)
+async def delete_review(review_id: str, user=Depends(get_current_user)):
+    """Soft-delete a review (only the reviewer who submitted it can delete).
+    
+    The review row is marked with deleted_at + deleted_by_user_id, but remains in
+    the database for audit / dispute resolution. RLS policies automatically exclude
+    soft-deleted rows from user-facing queries.
+    """
+    user_id = str(user.id)
+    
+    # Verify the review exists and belongs to the current user
+    review = (
+        _db()
+        .table("reviews")
+        .select("id, reviewer_id")
+        .eq("id", review_id)
+        .limit(1)
+        .execute()
+    )
+    if not review.data:
+        raise HTTPException(status_code=404, detail="Review not found")
+    
+    if review.data[0]["reviewer_id"] != user_id:
+        raise HTTPException(status_code=403, detail="You can only delete your own reviews")
+    
+    # Soft delete: mark with timestamp + user ID, but don't remove the row
+    deleted_review = (
+        _db()
+        .table("reviews")
+        .update({
+            "deleted_at":          "now()",
+            "deleted_by_user_id":  user_id,
+        })
+        .eq("id", review_id)
+        .execute()
+    )
+    
+    if not deleted_review.data:
+        log.error("review_delete_failed", extra={"user_id": user_id, "review_id": review_id})
+        raise HTTPException(status_code=500, detail="Failed to delete review")
+    
+    log.info("review_deleted", extra={"user_id": user_id, "review_id": review_id})
+    return {"status": "deleted", "review_id": review_id}
+
+
 @router.get("/summary/{contractor_id}")
 async def contractor_review_summary(contractor_id: str):
     """Return aggregated rating averages for a contractor (public, no auth).
