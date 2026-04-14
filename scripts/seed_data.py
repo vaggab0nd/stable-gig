@@ -112,21 +112,19 @@ def setup_contractors(client: Client) -> dict[str, str]:
         # Update profile
         client.table("profiles").update({"full_name": full_name}).eq("id", user_id).execute()
 
-        # Create contractor record (contractor_details auto-created by trigger)
-        # activities is a TEXT[] column — pass as a PostgreSQL array literal
-        # to avoid PostgREST schema cache issues with array types.
-        activities_literal = "{" + ",".join(activities) + "}"
+        # Create contractor record via RPC to bypass PostgREST schema cache
+        # issues with TEXT[] columns (PGRST204).
         try:
-            client.table("contractors").insert({
-                "id": user_id,
-                "business_name": business_name,
-                "postcode": postcode,
-                "phone": phone,
-                "activities": activities_literal,
+            client.rpc("seed_insert_contractor", {
+                "p_id": user_id,
+                "p_business_name": business_name,
+                "p_postcode": postcode,
+                "p_phone": phone,
+                "p_activities": activities,
             }).execute()
             print(f"    → Created contractor: {business_name}")
         except Exception as e:
-            if "duplicate" in str(e).lower():
+            if "duplicate" in str(e).lower() or "already exists" in str(e).lower():
                 print(f"    → Contractor exists: {business_name}")
             else:
                 raise
