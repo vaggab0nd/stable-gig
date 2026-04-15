@@ -75,9 +75,9 @@ def _build_profile_text(contractor: dict, details: dict | None) -> str:
     if name:
         parts.append(name)
 
-    activities = contractor.get("activities") or []
-    if activities:
-        parts.append(f"Trades: {', '.join(activities)}")
+    expertise = contractor.get("expertise") or []
+    if expertise:
+        parts.append(f"Trades: {', '.join(expertise)}")
 
     if details:
         years = details.get("years_experience")
@@ -85,9 +85,10 @@ def _build_profile_text(contractor: dict, details: dict | None) -> str:
             parts.append(f"{years} years of experience")
         if details.get("insurance_verified"):
             parts.append("Fully insured")
-        license_no = details.get("license_number") or ""
-        if license_no:
-            parts.append(f"Licensed (ref: {license_no})")
+    # license_number lives on the contractors table itself
+    license_no = (contractor.get("license_number") or "").strip()
+    if license_no:
+        parts.append(f"Licensed (ref: {license_no})")
 
     postcode = (contractor.get("postcode") or "").strip()
     if postcode:
@@ -242,7 +243,7 @@ async def find_matching_contractors(
 
     query = db.table("contractors").select("*, contractor_details(*)")
     if activity:
-        query = query.contains("activities", [activity])
+        query = query.contains("expertise", [activity])
     fallback_res = query.limit(limit).execute()
 
     for c in (fallback_res.data or []):
