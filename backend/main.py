@@ -124,7 +124,10 @@ async def startup_checks():
     """Log configuration status for optional services."""
     from app.config import settings
     from app.services.push_service import _vapid_configured
-    
+    from app.database import probe_supabase_anon_key
+
+    probe_supabase_anon_key()
+
     if not _vapid_configured():
         log.error(
             "CRITICAL: VAPID not configured. Push notifications disabled.",
@@ -132,7 +135,7 @@ async def startup_checks():
                 "hint": "Set VAPID_PRIVATE_KEY, VAPID_PUBLIC_KEY, VAPID_CLAIMS_EMAIL in environment.",
             },
         )
-    
+
     if not settings.stripe_secret_key:
         log.warning("Stripe secret key not configured. Payment processing disabled.")
 
