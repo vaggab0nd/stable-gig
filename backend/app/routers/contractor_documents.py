@@ -89,6 +89,27 @@ def _get_document_or_404(doc_id: str, contractor_id: str) -> dict:
     return res.data[0]
 
 
+def _parse_expires_at(value: str | None) -> datetime | None:
+    if value is None:
+        return None
+
+    raw = value.strip()
+    if not raw:
+        return None
+
+    try:
+        # Date-only values are treated as valid until end of day UTC.
+        if "T" not in raw:
+            return datetime.fromisoformat(f"{raw}T23:59:59+00:00")
+
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -147,7 +168,7 @@ async def upload_document(
         "expires_at":         expires_at,
     }
     if status == "verified":
-        row["verified_at"] = "now()"
+        row["verified_at"] = datetime.now(timezone.utc).isoformat()
 
     res = _db().table("contractor_documents").insert(row).execute()
     if not res.data:
@@ -205,11 +226,16 @@ async def list_contractor_documents(contractor_id: str):
     # PostgREST doesn't support `expires_at > now() OR expires_at IS NULL` in one
     # filter, so we do the expiry check in Python.
     now = datetime.now(timezone.utc)
-    docs = [
-        d for d in (res.data or [])
-        if d.get("expires_at") is None
-        or datetime.fromisoformat(d["expires_at"].replace("Z", "+00:00")) > now
-    ]
+    docs = []
+    for d in (res.data or []):
+        expires_at = d.get("expires_at")
+        if expires_at is None:
+            docs.append(d)
+            continue
+
+        parsed_expires_at = _parse_expires_at(expires_at)
+        if parsed_expires_at and parsed_expires_at > now:
+            docs.append(d)
     return docs
 
 
@@ -221,7 +247,7 @@ async def delete_document(doc_id: str, user=Depends(get_current_user)):
     doc        = _get_document_or_404(doc_id, contractor["id"])
 
     _db().table("contractor_documents").update({
-        "deleted_at":         "now()",
+        "deleted_at":         datetime.now(timezone.utc).isoformat(),
         "deleted_by_user_id": user_id,
     }).eq("id", doc["id"]).execute()
 

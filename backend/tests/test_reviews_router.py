@@ -48,13 +48,11 @@ _CONTRACTOR_USER = SimpleNamespace(id=_CONTRACTOR_ID)
 
 _REVIEW_PAYLOAD = {
     "job_id":               _JOB_ID,
-    "reviewee_id":          _CONTRACTOR_ID,
-    "reviewee_role":        "contractor",
-    "reviewer_role":        "client",
+    "contractor_id":        _CONTRACTOR_ID,
     "rating_cleanliness":   4,
     "rating_communication": 5,
     "rating_quality":       4,
-    "body":                 "Great work, very tidy.",
+    "comment":              "Great work, very tidy.",
     "private_feedback":     "Slightly overcharged.",
 }
 
@@ -63,18 +61,13 @@ _REVIEW_ROW = {
     "id":                   "rev-001",
     "job_id":               _JOB_ID,
     "reviewer_id":          _CLIENT_ID,
-    "reviewee_id":          _CONTRACTOR_ID,
-    "reviewer_role":        "client",
-    "reviewee_role":        "contractor",
+    "contractor_id":        _CONTRACTOR_ID,
     "rating_cleanliness":   4,
     "rating_communication": 5,
     "rating_quality":       4,
-    "rating":               "4.33",
-    "body":                 "Great work, very tidy.",
-    "ai_pros_cons":         None,
-    "content_visible":      False,
-    "reveal_at":            "2026-04-11T10:00:00Z",
-    "submitted_at":         "2026-03-28T10:00:00Z",
+    "overall":              4.33,
+    "comment":              "Great work, very tidy.",
+    "created_at":           "2026-03-28T10:00:00Z",
     "private_feedback":     "Slightly overcharged.",
 }
 
@@ -133,7 +126,7 @@ class TestSubmitReview:
         assert resp.status_code == 201
         data = resp.json()
         assert data["id"] == "rev-001"
-        assert data["reviewer_role"] == "client"
+        assert data["contractor_id"] == _CONTRACTOR_ID
 
     def test_private_feedback_stripped_from_response(self, client_auth):
         db = _make_db()
@@ -150,8 +143,8 @@ class TestSubmitReview:
         assert "private_feedback" not in resp.json()
 
     def test_without_body_201(self, client_auth):
-        payload = {**_REVIEW_PAYLOAD, "body": None, "private_feedback": None}
-        row = {**_REVIEW_ROW, "body": None, "private_feedback": None}
+        payload = {**_REVIEW_PAYLOAD, "comment": None, "private_feedback": None}
+        row = {**_REVIEW_ROW, "comment": None, "private_feedback": None}
 
         db = _make_db()
         db.execute.side_effect = [
@@ -186,8 +179,8 @@ class TestSubmitReview:
 
         assert resp.status_code == 404
 
-    def test_same_roles_422(self, client_auth):
-        payload = {**_REVIEW_PAYLOAD, "reviewer_role": "contractor", "reviewee_role": "contractor"}
+    def test_invalid_rating_cleanliness_422(self, client_auth):
+        payload = {**_REVIEW_PAYLOAD, "rating_cleanliness": 6}
 
         db = _make_db()
         with patch("app.routers.reviews.get_supabase_admin", return_value=db):
@@ -195,8 +188,8 @@ class TestSubmitReview:
 
         assert resp.status_code == 422
 
-    def test_invalid_reviewee_role_422(self, client_auth):
-        payload = {**_REVIEW_PAYLOAD, "reviewee_role": "admin"}
+    def test_missing_contractor_id_422(self, client_auth):
+        payload = {k: v for k, v in _REVIEW_PAYLOAD.items() if k != "contractor_id"}
 
         db = _make_db()
         with patch("app.routers.reviews.get_supabase_admin", return_value=db):
@@ -233,7 +226,7 @@ class TestListContractorReviews:
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) == 1
-        assert data[0]["reviewee_role"] == "contractor"
+        assert data[0]["contractor_id"] == _CONTRACTOR_ID
 
     def test_returns_empty_list_when_none(self, client_auth):
         db = _make_db()
@@ -257,8 +250,8 @@ class TestListContractorReviews:
 class TestContractorReviewSummary:
     def test_returns_averages_200(self, anon_client):
         rows = [
-            {"rating_cleanliness": 4, "rating_communication": 5, "rating_quality": 4, "rating": "4.33"},
-            {"rating_cleanliness": 5, "rating_communication": 5, "rating_quality": 5, "rating": "5.00"},
+            {"rating_cleanliness": 4, "rating_communication": 5, "rating_quality": 4, "overall": 4.33},
+            {"rating_cleanliness": 5, "rating_communication": 5, "rating_quality": 5, "overall": 5.00},
         ]
         db = _make_db()
         db.execute.return_value = MagicMock(data=rows)
@@ -272,7 +265,7 @@ class TestContractorReviewSummary:
         assert data["avg_cleanliness"] == 4.5
         assert data["avg_communication"] == 5.0
         assert data["avg_quality"] == 4.5
-        # avg_rating uses the 'rating' column (string converted to float)
+        assert data["avg_rating"] == 4.67
         assert data["contractor_id"] == _CONTRACTOR_ID
 
     def test_zeros_when_no_reviews(self, anon_client):
