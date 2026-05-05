@@ -19,6 +19,7 @@ Auth: all endpoints require a valid Supabase JWT.
 """
 
 import logging
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -272,7 +273,7 @@ async def delete_bid(job_id: str, bid_id: str, user=Depends(get_current_user)):
         _db()
         .table("bids")
         .update({
-            "deleted_at":          "now()",
+            "deleted_at":          datetime.now(timezone.utc).isoformat(),
             "deleted_by_user_id":  user_id,
         })
         .eq("id", bid_id)

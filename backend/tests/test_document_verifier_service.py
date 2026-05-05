@@ -34,7 +34,7 @@ No real Gemini calls are made — genai is mocked via conftest.py sys.modules st
 import base64
 import io
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from PIL import Image
@@ -221,6 +221,20 @@ class TestFetchDocumentBytes:
     async def test_plain_string_raises(self):
         with pytest.raises(ValueError, match="HTTPS URL or a base64 data URI"):
             await _fetch_document_bytes("just a random string")
+
+    @pytest.mark.asyncio
+    async def test_http_url_rejected(self):
+        with pytest.raises(ValueError, match="must use HTTPS"):
+            await _fetch_document_bytes("http://example.com/doc.jpg")
+
+    @pytest.mark.asyncio
+    async def test_private_or_local_host_rejected(self):
+        with patch(
+            "app.services.document_verifier._is_safe_public_host",
+            new=AsyncMock(return_value=False),
+        ):
+            with pytest.raises(ValueError, match="host is not allowed"):
+                await _fetch_document_bytes("https://localhost/doc.jpg")
 
 
 # ---------------------------------------------------------------------------

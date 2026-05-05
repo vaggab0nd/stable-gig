@@ -53,7 +53,7 @@ from app.services.contractor_matcher import (
 # ---------------------------------------------------------------------------
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 def _make_db(*execute_responses):
@@ -82,13 +82,13 @@ class TestBuildProfileText:
     def test_full_profile_includes_all_fields(self):
         contractor = {
             "business_name": "Bob's Plumbing",
-            "activities": ["plumbing", "heating"],
+            "expertise": ["plumbing", "heating"],
+            "license_number": "PL123",
             "postcode": "SW1A 1AA",
         }
         details = {
             "years_experience": 10,
             "insurance_verified": True,
-            "license_number": "PL123",
         }
         text = _build_profile_text(contractor, details)
         assert "Bob's Plumbing" in text
@@ -100,7 +100,7 @@ class TestBuildProfileText:
         assert "SW1A 1AA" in text
 
     def test_no_details_row(self):
-        contractor = {"business_name": "Sparks Ltd", "activities": ["electrical"], "postcode": "E1 6RF"}
+        contractor = {"business_name": "Sparks Ltd", "expertise": ["electrical"], "postcode": "E1 6RF"}
         text = _build_profile_text(contractor, None)
         assert "Sparks Ltd" in text
         assert "electrical" in text
@@ -118,7 +118,7 @@ class TestBuildProfileText:
         assert "insured" not in text
 
     def test_missing_experience_and_license_omitted(self):
-        contractor = {"business_name": "Roofers R Us", "activities": ["roofing"]}
+        contractor = {"business_name": "Roofers R Us", "expertise": ["roofing"]}
         details = {"years_experience": None, "insurance_verified": True, "license_number": ""}
         text = _build_profile_text(contractor, details)
         assert "None years" not in text
@@ -209,7 +209,7 @@ class TestUpdateContractorEmbedding:
         contractor = {
             "id": "c-001",
             "business_name": "Fix It Fast",
-            "activities": ["plumbing"],
+            "expertise": ["plumbing"],
             "postcode": "SW1",
         }
         details = {
@@ -231,7 +231,7 @@ class TestUpdateContractorEmbedding:
         contractor = {
             "id": "c-001",
             "business_name": "Solo Sparks",
-            "activities": ["electrical"],
+            "expertise": ["electrical"],
             "postcode": "W1A",
         }
         # execute order: contractor found, details empty, update
@@ -250,7 +250,7 @@ class TestUpdateContractorEmbedding:
 
     def test_raises_value_error_for_empty_profile(self):
         # Empty contractor — no name, no trades, no postcode
-        contractor = {"id": "c-001", "business_name": "", "activities": [], "postcode": ""}
+        contractor = {"id": "c-001", "business_name": "", "expertise": [], "postcode": ""}
         # execute order: contractor found, details empty
         db = _make_db([contractor], [])
         with patch("app.services.contractor_matcher.get_supabase_admin", return_value=db):
@@ -261,7 +261,7 @@ class TestUpdateContractorEmbedding:
         contractor = {
             "id": "c-001",
             "business_name": "Drains Direct",
-            "activities": ["drainage"],
+            "expertise": ["drainage"],
             "postcode": "N1",
         }
         db = _make_db([contractor], [], [])
@@ -313,7 +313,7 @@ class TestFindMatchingContractors:
         assert results[1]["match_score"] == 0.70
 
     def test_falls_back_to_activity_filter_when_rpc_returns_empty(self):
-        fallback_contractor = {"id": "c-001", "activities": ["plumbing"]}
+        fallback_contractor = {"id": "c-001", "expertise": ["plumbing"]}
         # execute order: rpc call (empty), fallback query
         db = _make_db([], [fallback_contractor])
 

@@ -168,6 +168,10 @@ class TestUploadDocument:
         assert data["status"] == "verified"
         assert data["extracted_data"]["insured_name"] == "Acme Plumbing Ltd"
 
+        insert_payload = db.insert.call_args_list[-1][0][0]
+        assert insert_payload["verified_at"] != "now()"
+        assert insert_payload["verified_at"].endswith("+00:00")
+
     def test_needs_review_201(self, contractor_client):
         from app.services.document_verifier import VerificationResult
 
@@ -352,6 +356,20 @@ class TestListContractorDocuments:
         assert resp.status_code == 200
         assert len(resp.json()) == 1
 
+    def test_date_only_expiry_string_is_handled(self, contractor_client):
+        date_only_doc = {
+            **_PUBLIC_DOC,
+            "expires_at": "2099-12-31",
+        }
+        db = _make_db()
+        db.execute.return_value = MagicMock(data=[date_only_doc])
+
+        with patch("app.routers.contractor_documents.get_supabase_admin", return_value=db):
+            resp = contractor_client.get(f"/contractors/{_CONTRACTOR_ID}/documents")
+
+        assert resp.status_code == 200
+        assert len(resp.json()) == 1
+
     def test_empty_list_for_unknown_contractor(self, contractor_client):
         db = _make_db()
         db.execute.return_value = MagicMock(data=[])
@@ -380,6 +398,9 @@ class TestDeleteDocument:
             resp = contractor_client.delete(f"/contractors/me/documents/{_DOC_ID}")
 
         assert resp.status_code == 204
+        update_payload = db.update.call_args_list[-1][0][0]
+        assert update_payload["deleted_at"] != "now()"
+        assert update_payload["deleted_at"].endswith("+00:00")
 
     def test_non_contractor_403(self, other_client):
         db = _make_db()

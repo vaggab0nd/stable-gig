@@ -272,6 +272,20 @@ class TestListJobs:
         assert resp.status_code == 200
         assert all(j["status"] == "open" for j in resp.json())
 
+    def test_contractor_lookup_uses_user_id_fk(self, contractor_client):
+        db = _make_db_mock()
+        db.execute.side_effect = [
+            MagicMock(data=[_CONTRACTOR_ROW]),
+            MagicMock(data=[_OPEN_JOB]),
+        ]
+
+        with patch("app.routers.jobs.get_supabase_admin", return_value=db):
+            resp = contractor_client.get("/jobs")
+
+        assert resp.status_code == 200
+        # _is_contractor should query contractors.user_id, not contractors.id
+        assert call("user_id", _CONTRACTOR_USER_ID) in db.eq.call_args_list
+
 
 # ---------------------------------------------------------------------------
 # GET /jobs/{id}
@@ -583,3 +597,25 @@ class TestMyBids:
             resp = owner_client.get("/me/bids")
 
         assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# DELETE /jobs/{job_id}/bids/{bid_id}
+# ---------------------------------------------------------------------------
+
+class TestDeleteBid:
+    def test_soft_delete_writes_iso_timestamp(self, contractor_client):
+        db = _make_db_mock()
+        db.execute.side_effect = [
+            MagicMock(data=[_PENDING_BID]),     # bid lookup
+            MagicMock(data=[_CONTRACTOR_ROW]),  # contractor lookup
+            MagicMock(data=[_PENDING_BID]),     # update
+        ]
+
+        with patch("app.routers.bids.get_supabase_admin", return_value=db):
+            resp = contractor_client.delete(f"/jobs/{_OPEN_JOB['id']}/bids/{_PENDING_BID['id']}")
+
+        assert resp.status_code == 200
+        update_payload = db.update.call_args_list[-1][0][0]
+        assert update_payload["deleted_at"] != "now()"
+        assert update_payload["deleted_at"].endswith("+00:00")

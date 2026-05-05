@@ -25,11 +25,14 @@ If all required fields are null the status is set to 'needs_review'.
 import asyncio
 import base64
 import io
+import ipaddress
 import json
 import logging
 import re
+import socket
 from dataclasses import dataclass
 from typing import Literal
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from PIL import Image
@@ -47,6 +50,7 @@ DocumentType = Literal["insurance", "licence", "certification", "other"]
 _MAX_FETCH_BYTES = 20 * 1_024 * 1_024  # 20 MB per document
 _MAX_DIMENSION   = 2_000               # px — keep text readable for OCR
 _JPEG_QUALITY    = 90                  # High quality preserves text detail
+_MAX_REDIRECTS   = 3
 
 # Fields that must not all be null for auto-verification to succeed
 _REQUIRED_FIELDS: dict[str, list[str]] = {
@@ -174,10 +178,74 @@ async def _fetch_document_bytes(source: str) -> bytes:
             raise ValueError(f"Base64 decode failed: {exc}") from exc
 
     if source.startswith(("http://", "https://")):
-        async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
+        return await _fetch_https_bytes_safely(source)
+
+    raise ValueError(
+        "Document must be an HTTPS URL or a base64 data URI (data:image/...;base64,...)"
+    )
+
+
+def _is_disallowed_ip(ip_str: str) -> bool:
+    ip = ipaddress.ip_address(ip_str)
+    return any([
+        ip.is_private,
+        ip.is_loopback,
+        ip.is_link_local,
+        ip.is_multicast,
+        ip.is_reserved,
+        ip.is_unspecified,
+    ])
+
+
+async def _is_safe_public_host(hostname: str) -> bool:
+    host = hostname.strip().lower()
+    if host in {"localhost", "localhost.localdomain"}:
+        return False
+
+    # Direct IP literal
+    try:
+        return not _is_disallowed_ip(host)
+    except ValueError:
+        pass
+
+    # DNS name: ensure every resolved address is routable/public
+    try:
+        addrinfo = await asyncio.to_thread(socket.getaddrinfo, host, 443)
+    except Exception:
+        return False
+
+    if not addrinfo:
+        return False
+
+    for entry in addrinfo:
+        ip_str = entry[4][0]
+        if _is_disallowed_ip(ip_str):
+            return False
+    return True
+
+
+async def _fetch_https_bytes_safely(url: str) -> bytes:
+    current_url = url
+    async with httpx.AsyncClient(follow_redirects=False, timeout=30) as client:
+        for _ in range(_MAX_REDIRECTS + 1):
+            parsed = urlparse(current_url)
+            if parsed.scheme != "https":
+                raise ValueError("Document URL must use HTTPS")
+            if not parsed.hostname:
+                raise ValueError("Document URL is missing a hostname")
+            if not await _is_safe_public_host(parsed.hostname):
+                raise ValueError("Document URL host is not allowed")
+
             chunks: list[bytes] = []
             total = 0
-            async with client.stream("GET", source) as resp:
+            async with client.stream("GET", current_url) as resp:
+                if resp.status_code in {301, 302, 303, 307, 308}:
+                    location = resp.headers.get("location")
+                    if not location:
+                        raise ValueError("Redirect response missing Location header")
+                    current_url = urljoin(current_url, location)
+                    continue
+
                 resp.raise_for_status()
                 async for chunk in resp.aiter_bytes(chunk_size=64 * 1_024):
                     total += len(chunk)
@@ -187,11 +255,9 @@ async def _fetch_document_bytes(source: str) -> bytes:
                             f"Document URL exceeds the {limit_mb} MB size limit"
                         )
                     chunks.append(chunk)
-        return b"".join(chunks)
+                return b"".join(chunks)
 
-    raise ValueError(
-        "Document must be an HTTPS URL or a base64 data URI (data:image/...;base64,...)"
-    )
+    raise ValueError("Too many redirects while fetching document URL")
 
 
 # ---------------------------------------------------------------------------
