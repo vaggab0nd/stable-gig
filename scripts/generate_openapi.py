@@ -14,7 +14,10 @@ def main() -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     app = load_app()
-    output_path.write_text(json.dumps(app.openapi(), indent=2), encoding="utf-8")
+    output_path.write_text(
+        json.dumps(app.openapi(), indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
     print(f"Wrote {output_path}")
 
 
