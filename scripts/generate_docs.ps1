@@ -26,7 +26,10 @@ try {
 
     Write-Host "Collecting pytest inventory..."
     $inventoryOutput = Invoke-CheckedCommand { python -m pytest --collect-only -q } "Pytest inventory collection failed"
-    $inventoryLines = $inventoryOutput | Where-Object { $_ -match '^tests/' }
+    $inventoryLines = $inventoryOutput |
+        Where-Object { $_ -match '^tests[\\/]' } |
+        ForEach-Object { $_ -replace '\\', '/' } |
+        Sort-Object -Unique
     $inventoryLines | Out-File -FilePath (Join-Path $outputDir "test-inventory.txt") -Encoding utf8
 
     if (-not $SkipJunit) {
